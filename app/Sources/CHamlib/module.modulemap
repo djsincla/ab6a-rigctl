@@ -1,0 +1,5 @@
+module CHamlib {
+    header "shim.h"
+    link "hamlib"
+    export *
+}

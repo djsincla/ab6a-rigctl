@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AB6A RigCtl</title>
+<style>
+  :root {
+    --ground: #0d151e;
+    --panel: #16212e;
+    --line: #263444;
+    --ink: #e8eef5;
+    --muted: #8fa3b8;
+    --accent: #ffa03c;
+    --accent-dim: #ff8237;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 24px; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  /* hero */
+  header { padding: 84px 0 64px; text-align: center; position: relative; overflow: hidden; }
+  header::before {
+    content: ""; position: absolute; inset: -60% 0 auto 0; height: 520px;
+    background: radial-gradient(ellipse at 50% 100%, rgba(255,160,60,.16), transparent 62%);
+    pointer-events: none;
+  }
+  .logo { width: 132px; height: 132px; border-radius: 30px; position: relative; }
+  h1 {
+    font-size: 44px; letter-spacing: -.02em; margin: 22px 0 8px; font-weight: 650;
+    position: relative;
+  }
+  .tag { color: var(--accent); font-size: 19px; margin: 0 0 6px; position: relative; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0; position: relative; }
+
+  /* menu mock */
+  .demo { display: flex; justify-content: center; margin: 48px 0 8px; position: relative; }
+  .menu {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 10px 0; width: 340px; text-align: left;
+    box-shadow: 0 24px 60px rgba(0,0,0,.5);
+    font-size: 13px;
+  }
+  .menu .radio { padding: 6px 16px 2px; font-weight: 600; }
+  .menu .radio span { font-weight: 400; color: var(--muted); font-size: 11px; margin-left: 8px; }
+  .menu .row {
+    padding: 5px 16px; display: flex; align-items: center; gap: 9px;
+  }
+  .menu .row.on { background: rgba(255,160,60,.09); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #46586c; flex: none; }
+  .row.on .dot { background: var(--accent); box-shadow: 0 0 9px rgba(255,160,60,.7); }
+  .menu .port { margin-left: auto; color: var(--muted); font-size: 11px; }
+  .menu .freq {
+    padding: 0 16px 6px 32px; color: var(--accent);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  }
+  .menu .freq em { color: var(--muted); font-style: normal; font-size: 11px; margin-left: 7px; }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: 8px 0; }
+  .menu .act { padding: 4px 16px; color: var(--ink); }
+  .menu .act.dim { color: var(--muted); }
+  .caption { text-align: center; color: var(--muted); font-size: 12.5px; margin: 14px 0 0; }
+
+  /* sections */
+  section { padding: 56px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 22px; margin: 0 0 20px; letter-spacing: -.01em; }
+  h2::before {
+    content: ""; display: inline-block; width: 3px; height: 18px; background: var(--accent);
+    margin-right: 11px; vertical-align: -2px; border-radius: 2px;
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 22px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px;
+  }
+  .card h3 { margin: 0 0 7px; font-size: 15px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14px; }
+  pre {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; overflow-x: auto; font-size: 13px; color: var(--ink);
+  }
+  pre .c { color: var(--muted); }
+  pre .a { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase;
+       letter-spacing: .05em; }
+  td code { color: var(--accent); font-size: 12.5px; }
+  .warn {
+    border-left: 3px solid var(--accent); background: rgba(255,160,60,.07);
+    padding: 14px 18px; border-radius: 0 8px 8px 0; color: var(--ink); font-size: 14.5px;
+  }
+  footer {
+    border-top: 1px solid var(--line); padding: 30px 0 60px;
+    color: var(--muted); font-size: 13px; text-align: center;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <img class="logo" src="icon.png" alt="AB6A RigCtl">
+    <h1>AB6A RigCtl</h1>
+    <p class="tag">rigctld, without the terminal</p>
+    <p class="sub">A macOS menu bar app that finds your radios and runs a Hamlib daemon for each one.</p>
+
+    <div class="demo">
+      <div class="menu">
+        <div class="radio">IC-7760 <span>Icom IC-7760</span></div>
+        <div class="row on"><span class="dot"></span> main <span class="port">port 4532</span></div>
+        <div class="freq">14.321.000 MHz <em>PKTUSB</em></div>
+        <div class="row on"><span class="dot"></span> second <span class="port">port 4533</span></div>
+        <div class="freq">14.321.000 MHz <em>PKTUSB</em></div>
+        <hr>
+        <div class="act">Start all connected</div>
+        <div class="act dim">Stop all</div>
+        <hr>
+        <div class="act">Quit AB6A RigCtl</div>
+      </div>
+    </div>
+    <p class="caption">One radio, two interfaces, two independent daemons.</p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>What it does</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Finds your radios</h3>
+        <p>Reads the USB descriptor over IOKit, so a radio identifies itself. An IC-7760 is
+           recognised as Hamlib model 3092 without being told.</p>
+      </div>
+      <div class="card">
+        <h3>Survives replugging</h3>
+        <p>Profiles are keyed on the USB serial number and interface number, not the
+           <code>/dev</code> path. Move the radio to another port and it is still recognised.</p>
+      </div>
+      <div class="card">
+        <h3>One daemon per interface</h3>
+        <p>A radio with several interfaces runs several daemons, each on its own TCP port —
+           one for WSJT-X, another for logging.</p>
+      </div>
+      <div class="card">
+        <h3>Live frequency</h3>
+        <p>Reads frequency and mode straight from the running daemon through libhamlib's
+           NETRIGCTL backend.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>An interface is never shared</h2>
+    <p class="warn">
+      Exactly one daemon owns each serial interface. Two daemons on one interface
+      <em>appear</em> to work, which is the danger: measured on an IC-7760 at 60 concurrent
+      reads each, about 3% of transactions came back as <code>RPRT -9</code> / <code>RPRT -20</code>
+      protocol errors and the rest looked fine — and that was read-only traffic. Across two
+      different interfaces the same test was clean. Silent, intermittent corruption is worse
+      than an outright failure, so this is enforced rather than warned about.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Install</h2>
+<pre><span class="c"># Hamlib provides rigctld and libhamlib</span>
+brew install hamlib
+
+<span class="c"># build and install the app + CLI</span>
+./build-app.sh --install</pre>
+    <p style="color:var(--muted);font-size:14px;margin-top:14px">
+      Installs <code>/Applications/AB6A RigCtl.app</code> and puts <code>ab6a-rigctl</code>
+      on your <span style="color:var(--accent)">PATH</span>. The app lives in the menu bar
+      with no Dock icon. Both share one <code>~/.config/ab6a-rigctl/profiles.json</code>,
+      so they cannot disagree about your radios.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Command line</h2>
+    <table>
+      <tr><th>Command</th><th>Does</th></tr>
+      <tr><td><code>ab6a-rigctl</code></td><td>interactive manager — add radios, pick interfaces and ports</td></tr>
+      <tr><td><code>ab6a-rigctl devices</code></td><td>list attached radios</td></tr>
+      <tr><td><code>ab6a-rigctl list</code></td><td>saved radios and whether they are running</td></tr>
+      <tr><td><code>ab6a-rigctl start <span style="color:var(--muted)">[name|all]</span></code></td><td>a radio name starts every daemon on it</td></tr>
+      <tr><td><code>ab6a-rigctl stop <span style="color:var(--muted)">[name|all]</span></code></td><td>stop daemons</td></tr>
+      <tr><td><code>ab6a-rigctl shm</code></td><td>raise the shared memory limits WSJT-X needs</td></tr>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Why a daemon, not the library</h2>
+    <p style="color:var(--muted);font-size:15px;margin:0">
+      WSJT-X, fldigi and logging software connect to <code style="color:var(--accent)">localhost:4532</code>
+      and speak the rigctld network protocol — the daemon is the product, not an implementation
+      detail. An app that drove the radio in-process through libhamlib would hold the serial
+      interface open and give those programs nothing to connect to, while becoming a second
+      owner of a line that already has one. So libhamlib is linked only as a NETRIGCTL client:
+      it talks to rigctld over TCP, and never opens a serial port.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    GPL-2.0-or-later — the same licence Hamlib applies to its own programs.<br>
+    Built on <a href="https://hamlib.sourceforge.net/">Hamlib</a>, which is licensed separately
+    (libhamlib LGPL-2.1-or-later).
+  </div>
+</footer>
+
+</body>
+</html>

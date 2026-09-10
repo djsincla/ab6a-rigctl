@@ -1,0 +1,1531 @@
+#!/usr/bin/env python3
+"""ab6a-rigctl - a small macOS manager for Hamlib rigctld daemons.
+
+Lists the serial devices currently attached to the machine, remembers the
+radios you have configured, and starts/stops one or more rigctld daemons
+for them.
+
+Saved profiles are keyed on the USB fingerprint (vendor id, product id,
+serial number, interface number) rather than the /dev path, so a radio
+plugged into a different port is still recognised.
+"""
+
+import json
+import os
+import plistlib
+import re
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+# Launched from Finder the PATH is minimal, so make sure Homebrew's bin is on it
+# before anything looks for rigctl/rigctld.
+for _extra in ("/opt/homebrew/bin", "/usr/local/bin"):
+    if _extra not in os.environ.get("PATH", "").split(":"):
+        os.environ["PATH"] = os.environ.get("PATH", "") + ":" + _extra
+
+CONFIG_DIR = os.environ.get("AB6A_CONFIG_DIR") or os.path.expanduser("~/.config/ab6a-rigctl")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "profiles.json")
+STATE_DIR = os.environ.get("AB6A_STATE_DIR") or os.path.expanduser("~/.local/state/ab6a-rigctl")
+
+DEFAULT_PORT = 4532
+BAUD_CHOICES = [4800, 9600, 19200, 38400, 57600, 115200]
+
+# SysV shared-memory limits some ham software (notably WSJT-X on macOS) needs
+# raised above the stock values. macOS resets these on every boot unless they
+# are written to /etc/sysctl.conf. Order matters - applied as listed.
+SHM_DEFAULTS = [
+    ("kern.sysv.shmall", 25600),
+    ("kern.sysv.shmmax", 52428800),
+]
+SYSCTL_CONF = "/etc/sysctl.conf"
+
+# Radios are reached through /dev/cu.usbmodem* only; everything else on the bus
+# (USB-serial bridges, Bluetooth ports, the debug console) is hidden unless the
+# device list is unfiltered with the 'v' toggle or --all.
+DEV_MATCH = re.compile(r"^/dev/cu\.usbmodem", re.I)
+SHOW_ALL_DEVICES = False
+
+
+def is_candidate(dev_path):
+    return SHOW_ALL_DEVICES or bool(DEV_MATCH.match(dev_path))
+
+
+# --------------------------------------------------------------------------
+# terminal helpers
+# --------------------------------------------------------------------------
+
+USE_COLOR = sys.stdout.isatty() and os.environ.get("TERM") not in (None, "dumb")
+
+
+def c(text, code):
+    if not USE_COLOR:
+        return text
+    return "\033[%sm%s\033[0m" % (code, text)
+
+
+def bold(t):
+    return c(t, "1")
+
+
+def dim(t):
+    return c(t, "2")
+
+
+def green(t):
+    return c(t, "32")
+
+
+def yellow(t):
+    return c(t, "33")
+
+
+def red(t):
+    return c(t, "31")
+
+
+def cyan(t):
+    return c(t, "36")
+
+
+def die(msg, code=1):
+    print(red("error: ") + msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def warn(msg):
+    print(yellow("warning: ") + msg)
+
+
+# --------------------------------------------------------------------------
+# device discovery
+# --------------------------------------------------------------------------
+
+IOREG_KEYS = (
+    "USB Vendor Name",
+    "USB Product Name",
+    "USB Serial Number",
+    "idVendor",
+    "idProduct",
+    "locationID",
+    "bInterfaceNumber",
+)
+
+
+def discover_devices():
+    """Return a list of attached serial devices, USB ones enriched with identity."""
+    devices = []
+    seen = set()
+
+    try:
+        out = subprocess.run(
+            ["ioreg", "-a", "-l", "-w0", "-p", "IOService", "-r", "-c", "IOUSBHostDevice"],
+            capture_output=True, timeout=20,
+        ).stdout
+        tree = plistlib.loads(out) if out.strip() else []
+    except Exception as exc:  # ioreg missing or unparsable - fall back to /dev glob
+        warn("could not query ioreg (%s); USB names unavailable" % exc)
+        tree = []
+
+    def walk(node, inherited):
+        cur = dict(inherited)
+        for k in IOREG_KEYS:
+            if k in node:
+                cur[k] = node[k]
+        dev = node.get("IOCalloutDevice")
+        if dev and is_candidate(dev):
+            seen.add(dev)
+            devices.append({
+                "dev": dev,
+                "vendor": cur.get("USB Vendor Name"),
+                "product": cur.get("USB Product Name"),
+                "serial": cur.get("USB Serial Number"),
+                "vid": cur.get("idVendor"),
+                "pid": cur.get("idProduct"),
+                "interface": cur.get("bInterfaceNumber"),
+                "location": cur.get("locationID"),
+            })
+        for child in node.get("IORegistryEntryChildren", []) or []:
+            walk(child, cur)
+
+    for root in tree:
+        walk(root, {})
+
+    # anything else in /dev/cu.* that isn't USB (bluetooth rigs, adapters ioreg missed)
+    try:
+        for name in sorted(os.listdir("/dev")):
+            if not name.startswith("cu."):
+                continue
+            dev = "/dev/" + name
+            if dev in seen or not is_candidate(dev):
+                continue
+            devices.append({
+                "dev": dev, "vendor": None, "product": None, "serial": None,
+                "vid": None, "pid": None, "interface": None, "location": None,
+            })
+    except OSError:
+        pass
+
+    devices.sort(key=lambda d: (d.get("product") or "zzz", d.get("interface") or 0, d["dev"]))
+    return devices
+
+
+def device_label(d):
+    """Human name for a device."""
+    if d.get("product"):
+        label = d["product"]
+        if d.get("vendor") and d["vendor"].split()[0].lower() not in label.lower():
+            label = "%s %s" % (d["vendor"], label)
+    else:
+        label = os.path.basename(d["dev"])
+    if d.get("interface") is not None:
+        label += " #%d" % d["interface"]
+    return label
+
+
+def fingerprint(d):
+    """Stable identity for a device across replugging."""
+    return {
+        "vid": d.get("vid"),
+        "pid": d.get("pid"),
+        "serial": d.get("serial"),
+        "interface": d.get("interface"),
+        "product": d.get("product"),
+        "vendor": d.get("vendor"),
+    }
+
+
+def match_device(fp, devices):
+    """Find the currently attached device matching a saved fingerprint."""
+    if not fp:
+        return None
+
+    # strongest: vid+pid+serial+interface
+    if fp.get("serial") and fp.get("vid") is not None:
+        for d in devices:
+            if (d.get("vid") == fp["vid"] and d.get("pid") == fp["pid"]
+                    and d.get("serial") == fp["serial"]
+                    and d.get("interface") == fp.get("interface")):
+                return d
+
+    # same model, no serial to go on (or serial changed): vid+pid+interface
+    if fp.get("vid") is not None:
+        candidates = [d for d in devices
+                      if d.get("vid") == fp["vid"] and d.get("pid") == fp["pid"]
+                      and d.get("interface") == fp.get("interface")]
+        if len(candidates) == 1:
+            return candidates[0]
+
+    # last resort: the exact /dev path we used before
+    if fp.get("dev"):
+        for d in devices:
+            if d["dev"] == fp["dev"]:
+                return d
+    return None
+
+
+def radio_key(d):
+    """Identity of the physical radio, shared by all of its interfaces."""
+    if d.get("serial"):
+        return "%s:%s:%s" % (d.get("vid"), d.get("pid"), d["serial"])
+    if d.get("vid") is not None:
+        return "%s:%s:loc%s" % (d.get("vid"), d.get("pid"), d.get("location"))
+    return d["dev"]
+
+
+def radio_name_of(d):
+    return d.get("product") or os.path.basename(d["dev"])
+
+
+def group_devices(devices):
+    """One entry per physical radio, each holding its serial interfaces.
+
+    A radio like the IC-7760 exposes several interfaces; they are one radio,
+    not several, and each interface carries its own daemon.
+    """
+    groups = {}
+    for d in devices:
+        key = radio_key(d)
+        g = groups.setdefault(key, {
+            "key": key, "name": radio_name_of(d), "vendor": d.get("vendor"),
+            "serial": d.get("serial"), "interfaces": [],
+        })
+        g["interfaces"].append(d)
+    for g in groups.values():
+        g["interfaces"].sort(
+            key=lambda d: (d.get("interface") if d.get("interface") is not None else 0,
+                           d["dev"]))
+    return sorted(groups.values(), key=lambda g: g["name"])
+
+
+def interface_label(d):
+    n = d.get("interface")
+    return "interface %d" % n if n is not None else os.path.basename(d["dev"])
+
+
+def profile_radio_key(p):
+    r = p.get("radio") or {}
+    return r.get("key")
+
+
+def profile_radio_name(p):
+    r = p.get("radio") or {}
+    return r.get("name") or p["name"]
+
+
+def full_name(p):
+    """How a daemon is referred to across a whole shack."""
+    rn = profile_radio_name(p)
+    return "%s / %s" % (rn, p["name"]) if rn != p["name"] else p["name"]
+
+
+def radios_in_config(cfg):
+    """Ordered [(radio_name, [profiles])] for display and lookup."""
+    order, groups = [], {}
+    for p in cfg["profiles"]:
+        key = profile_radio_key(p) or p["id"]
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(p)
+    return [(profile_radio_name(groups[k][0]), groups[k]) for k in order]
+
+
+# --------------------------------------------------------------------------
+# hamlib model list
+# --------------------------------------------------------------------------
+
+_MODELS = None
+
+
+def rig_models():
+    """Parse `rigctl -l` into [{id, mfg, model, status}]."""
+    global _MODELS
+    if _MODELS is not None:
+        return _MODELS
+    _MODELS = []
+    try:
+        out = subprocess.run(["rigctl", "-l"], capture_output=True, text=True,
+                             timeout=20).stdout
+    except Exception:
+        return _MODELS
+    for line in out.splitlines():
+        m = re.match(r"\s*(\d+)\s\s+(.+)", line)
+        if not m:
+            continue
+        fields = re.split(r"\s{2,}", m.group(2).strip())
+        if len(fields) < 2:
+            continue
+        _MODELS.append({
+            "id": int(m.group(1)),
+            "mfg": fields[0].strip(),
+            "model": fields[1].strip(),
+            "status": fields[3].strip() if len(fields) > 3 else "",
+        })
+    return _MODELS
+
+
+def model_name(model_id):
+    for m in rig_models():
+        if m["id"] == model_id:
+            name = "%s %s" % (m["mfg"], m["model"])
+            if m["status"] and m["status"].lower() not in ("stable",):
+                name += " (%s)" % m["status"]
+            return name
+    return "model %s" % model_id
+
+
+def _norm(s):
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def suggest_models(device):
+    """Guess Hamlib models for a device from its USB product/vendor name."""
+    product = _norm(device.get("product"))
+    vendor = _norm(device.get("vendor"))
+    if not product:
+        return []
+
+    exact, partial = [], []
+    for m in rig_models():
+        mn = _norm(m["model"])
+        if not mn or len(mn) < 3:
+            continue
+        if mn == product:
+            exact.append(m)
+        elif mn in product or (len(product) >= 4 and product in mn):
+            partial.append(m)
+
+    hits = exact + partial
+    if hits:
+        # same-manufacturer matches first
+        hits.sort(key=lambda m: 0 if _norm(m["mfg"])[:4] and _norm(m["mfg"])[:4] in vendor else 1)
+        return hits[:8]
+
+    # generic USB-serial bridge - no rig implied, offer that manufacturer's rigs
+    return []
+
+
+# --------------------------------------------------------------------------
+# shared memory limits
+# --------------------------------------------------------------------------
+
+def shm_settings(cfg):
+    """Desired sysctl values - the defaults unless overridden in the config."""
+    saved = cfg.get("sysctl")
+    if isinstance(saved, dict) and saved:
+        return [(k, int(v)) for k, v in saved.items()]
+    return list(SHM_DEFAULTS)
+
+
+def sysctl_get(key):
+    try:
+        out = subprocess.run(["sysctl", "-n", key], capture_output=True,
+                             text=True, timeout=10)
+        if out.returncode != 0:
+            return None
+        return int(out.stdout.strip())
+    except (ValueError, OSError, subprocess.SubprocessError):
+        return None
+
+
+def shm_report(cfg):
+    """Print current vs wanted values. Returns the settings that need changing."""
+    wanted = shm_settings(cfg)
+    print(bold("\n  Shared memory limits"))
+    pending = []
+    for key, want in wanted:
+        have = sysctl_get(key)
+        if have is None:
+            mark, note = yellow("unreadable"), ""
+            pending.append((key, want))
+        elif have >= want:
+            mark, note = green("ok"), ""
+        else:
+            mark, note = red("too low"), dim("  wants %d" % want)
+            pending.append((key, want))
+        print("   %-22s %-12s %s%s" % (key, have if have is not None else "?", mark, note))
+
+    persisted = shm_persisted()
+    if persisted:
+        print(dim("   %s sets: %s" % (SYSCTL_CONF, ", ".join(persisted))))
+    else:
+        print(dim("   not persisted - macOS resets these on reboot"))
+    return pending
+
+
+def shm_persisted():
+    """Which of our keys already appear in /etc/sysctl.conf."""
+    try:
+        with open(SYSCTL_CONF) as fh:
+            body = fh.read()
+    except OSError:
+        return []
+    return [line.strip() for line in body.splitlines()
+            if line.strip().startswith("kern.sysv.shm")]
+
+
+def shm_apply(cfg):
+    """Raise the limits for this boot. Needs sudo."""
+    wanted = shm_settings(cfg)
+    print(dim("\n  running (sudo will prompt for your password):"))
+    for key, val in wanted:
+        print(dim("    sudo sysctl -w %s=%d" % (key, val)))
+    print()
+    ok = True
+    for key, val in wanted:
+        # inherit the terminal so sudo can prompt normally
+        rc = subprocess.run(["sudo", "sysctl", "-w", "%s=%d" % (key, val)]).returncode
+        if rc != 0:
+            print(red("  failed to set %s" % key))
+            ok = False
+    if ok:
+        print(green("\n  applied"))
+    return ok
+
+
+def shm_persist(cfg):
+    """Write the values to /etc/sysctl.conf so they survive a reboot."""
+    wanted = shm_settings(cfg)
+    existing = shm_persisted()
+    if existing:
+        print(yellow("\n  %s already contains:" % SYSCTL_CONF))
+        for line in existing:
+            print(dim("    " + line))
+        if not ask_yes("  replace those kern.sysv.shm* lines?", True):
+            return False
+
+    try:
+        with open(SYSCTL_CONF) as fh:
+            keep = [l for l in fh.read().splitlines()
+                    if not l.strip().startswith("kern.sysv.shm")]
+    except OSError:
+        keep = []
+
+    body = "\n".join(keep + ["%s=%d" % (k, v) for k, v in wanted]).strip() + "\n"
+    print(dim("\n  writing %s (sudo will prompt):" % SYSCTL_CONF))
+    for line in body.strip().splitlines():
+        print(dim("    " + line))
+    print()
+    proc = subprocess.run(["sudo", "tee", SYSCTL_CONF],
+                          input=body, text=True, stdout=subprocess.DEVNULL)
+    if proc.returncode != 0:
+        print(red("  could not write %s" % SYSCTL_CONF))
+        return False
+    print(green("  persisted - these now apply on every boot"))
+    return True
+
+
+def shm_menu(cfg):
+    pending = shm_report(cfg)
+    if pending:
+        if ask_yes("\n  raise them now?", True):
+            if shm_apply(cfg) and not shm_persisted():
+                if ask_yes("\n  also make this survive reboots?", True):
+                    shm_persist(cfg)
+    elif not shm_persisted():
+        if ask_yes("\n  values are fine now - make them survive reboots?", False):
+            shm_persist(cfg)
+    else:
+        print(green("\n  nothing to do"))
+
+
+# --------------------------------------------------------------------------
+# config
+# --------------------------------------------------------------------------
+
+def load_config():
+    if not os.path.exists(CONFIG_FILE):
+        return {"profiles": []}
+    try:
+        with open(CONFIG_FILE) as fh:
+            cfg = json.load(fh)
+    except (OSError, ValueError) as exc:
+        die("could not read %s: %s" % (CONFIG_FILE, exc))
+    cfg.setdefault("profiles", [])
+    # profiles written before radios and interfaces were distinguished carry no
+    # radio block - derive one from the device fingerprint
+    for p in cfg["profiles"]:
+        if not p.get("radio"):
+            fp = p.get("device") or {}
+            p["radio"] = {"key": radio_key(fp), "name": fp.get("product") or p["name"]}
+    return cfg
+
+
+def save_config(cfg):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    tmp = CONFIG_FILE + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(cfg, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, CONFIG_FILE)
+
+
+def slugify(name):
+    s = re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-").lower()
+    return s or "rig"
+
+
+def unique_id(cfg, base):
+    existing = {p["id"] for p in cfg["profiles"]}
+    if base not in existing:
+        return base
+    n = 2
+    while "%s-%d" % (base, n) in existing:
+        n += 1
+    return "%s-%d" % (base, n)
+
+
+# --------------------------------------------------------------------------
+# daemon control
+# --------------------------------------------------------------------------
+
+def pid_file(profile):
+    return os.path.join(STATE_DIR, profile["id"] + ".pid")
+
+
+def log_file(profile):
+    return os.path.join(STATE_DIR, profile["id"] + ".log")
+
+
+def process_cmd(pid):
+    try:
+        out = subprocess.run(["ps", "-p", str(pid), "-o", "command="],
+                             capture_output=True, text=True, timeout=10)
+        return out.stdout.strip()
+    except Exception:
+        return ""
+
+
+def running_pid(profile):
+    """PID of this profile's rigctld, or None."""
+    path = pid_file(profile)
+    try:
+        with open(path) as fh:
+            pid = int(fh.read().strip())
+    except (OSError, ValueError):
+        return None
+    cmd = process_cmd(pid)
+    if "rigctld" not in cmd:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return None
+    return pid
+
+
+def port_in_use(port):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.4)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def next_free_port(cfg, start=DEFAULT_PORT):
+    taken = {p.get("port") for p in cfg["profiles"]}
+    port = start
+    while port in taken or port_in_use(port):
+        port += 1
+    return port
+
+
+def build_command(profile, dev_path):
+    cmd = ["rigctld", "-m", str(profile["model"]), "-r", dev_path,
+           "-t", str(profile["port"])]
+    if profile.get("baud"):
+        cmd += ["-s", str(profile["baud"])]
+    if profile.get("civaddr"):
+        cmd += ["-c", str(profile["civaddr"])]
+    cmd += list(profile.get("extra_args") or [])
+    return cmd
+
+
+def start_profile(profile, devices, cfg):
+    pid = running_pid(profile)
+    if pid:
+        print(yellow("%s is already running (pid %d)" % (full_name(profile), pid)))
+        return True
+
+    dev = match_device(profile.get("device"), devices)
+    if not dev:
+        print(red("%s: device not connected" % full_name(profile)))
+        print(dim("  expected %s" % (profile.get("device", {}).get("product")
+                                     or profile.get("device", {}).get("dev") or "?")))
+        return False
+
+    holders = [p["name"] for p in cfg["profiles"]
+               if p["id"] != profile["id"] and running_pid(p)
+               and (match_device(p.get("device"), devices) or {}).get("dev") == dev["dev"]]
+    if holders:
+        print(red("%s: %s is already open by %s"
+                  % (profile["name"], dev["dev"], ", ".join(holders))))
+        print(dim("  a serial interface cannot be shared - stop that daemon first"))
+        return False
+
+    if port_in_use(profile["port"]):
+        print(red("%s: TCP port %d is already in use by something else"
+                  % (profile["name"], profile["port"])))
+        return False
+
+    os.makedirs(STATE_DIR, exist_ok=True)
+    cmd = build_command(profile, dev["dev"])
+    log = log_file(profile)
+
+    with open(log, "ab") as fh:
+        fh.write(("\n=== %s: %s ===\n"
+                  % (time.strftime("%Y-%m-%d %H:%M:%S"), " ".join(cmd))).encode())
+        fh.flush()
+        try:
+            proc = subprocess.Popen(cmd, stdout=fh, stderr=fh,
+                                    stdin=subprocess.DEVNULL,
+                                    start_new_session=True)
+        except FileNotFoundError:
+            die("rigctld not found on PATH - is hamlib installed? (brew install hamlib)")
+
+    # give it a moment to fail loudly (bad device, wrong model, busy port)
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            print(red("%s: rigctld exited immediately (status %d)"
+                      % (profile["name"], proc.returncode)))
+            tail_log(log, 8)
+            return False
+        if port_in_use(profile["port"]):
+            break
+        time.sleep(0.15)
+
+    with open(pid_file(profile), "w") as fh:
+        fh.write(str(proc.pid))
+
+    # remember where it actually was this time
+    profile.setdefault("device", {})["dev"] = dev["dev"]
+    save_config(cfg)
+
+    print(green("started ") + "%s  %s  port %s  pid %d"
+          % (bold(full_name(profile)), dev["dev"], profile["port"], proc.pid))
+    return True
+
+
+def stop_profile(profile, quiet=False):
+    pid = running_pid(profile)
+    if not pid:
+        if not quiet:
+            print(dim("%s is not running" % full_name(profile)))
+        return True
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError as exc:
+        print(red("%s: could not stop pid %d (%s)" % (profile["name"], pid, exc)))
+        return False
+
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        if "rigctld" not in process_cmd(pid):
+            break
+        time.sleep(0.1)
+    else:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+    try:
+        os.unlink(pid_file(profile))
+    except OSError:
+        pass
+    print(green("stopped ") + full_name(profile))
+    return True
+
+
+def tail_log(path, lines=15):
+    try:
+        with open(path) as fh:
+            tail = fh.readlines()[-lines:]
+    except OSError:
+        return
+    for line in tail:
+        print(dim("  | " + line.rstrip()))
+
+
+# --------------------------------------------------------------------------
+# display
+# --------------------------------------------------------------------------
+
+def profile_status(profile, devices):
+    pid = running_pid(profile)
+    dev = match_device(profile.get("device"), devices)
+    if pid:
+        return green("running"), pid, dev
+    if dev:
+        return dim("stopped"), None, dev
+    return red("no device"), None, None
+
+
+def print_profiles(cfg, devices):
+    print()
+    if not cfg["profiles"]:
+        print(dim("  no saved radios yet - press 'n' to add one"))
+        return
+    print(bold("  Saved radios"))
+    # pad the plain text first - colouring before padding would count the
+    # escape sequences and knock the columns out of line
+    n = 0
+    for radio_name, profiles in radios_in_config(cfg):
+        head = "  %s" % bold(radio_name)
+        detail = model_name(profiles[0]["model"])
+        if profiles[0].get("radio", {}).get("serial"):
+            detail += "   serial %s" % profiles[0]["radio"]["serial"]
+        print("%s   %s" % (head, dim(detail)))
+        for p in profiles:
+            n += 1
+            state, pid, dev = profile_status(p, devices)
+            label = p["name"][:16].ljust(16)
+            port = str(p["port"]).ljust(6)
+            where = (dev["dev"] if dev else "not connected")[:24].ljust(24)
+            line = "      %s  %s %s %s %s" % (
+                cyan("%2d" % n), label, cyan(port),
+                where if dev else dim(where), state)
+            if pid:
+                line += dim("  pid %d" % pid)
+            print(line)
+
+
+def print_devices(cfg, devices, only_unused=True):
+    """Radios that are attached but have no daemons yet.
+
+    Grouped by radio rather than listed per interface, and deliberately without
+    selectable handles - nothing takes a device as an argument, so offering one
+    would be a false affordance. Interfaces are chosen inside 'n'.
+    """
+    taken = taken_devices(cfg, devices)
+    radios = group_devices(devices)
+    shown = []
+    for g in radios:
+        free = [d for d in g["interfaces"] if d["dev"] not in taken]
+        if only_unused and not free:
+            continue
+        shown.append((g, free))
+
+    print()
+    scope = "all serial devices" if SHOW_ALL_DEVICES else "/dev/cu.usbmodem*"
+    print(bold("  Connected radios") + dim("  (%s%s)" % (
+        scope, ", not yet configured" if only_unused else "")))
+    if not shown:
+        print(dim("   none"))
+        return []
+
+    for g, free in shown:
+        n = len(free)
+        detail = "%d interface%s free" % (n, "" if n == 1 else "s")
+        tag = dim("   serial %s" % g["serial"]) if g.get("serial") else ""
+        print("   %s %-32s %s%s" % (dim("-"), g["name"][:32], dim(detail), tag))
+        for d in free:
+            print("       %s  %s" % (dim(interface_label(d).ljust(14)), dim(d["dev"])))
+    print(dim("\n   press 'n' to give one of these a daemon"))
+    return shown
+
+
+# --------------------------------------------------------------------------
+# prompts
+# --------------------------------------------------------------------------
+
+def ask(prompt, default=None):
+    suffix = " [%s]" % default if default not in (None, "") else ""
+    try:
+        val = input("%s%s: " % (prompt, suffix)).strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        raise
+    return val or (str(default) if default is not None else "")
+
+
+def ask_int(prompt, default=None, allow_blank=False):
+    while True:
+        val = ask(prompt, default)
+        if not val and allow_blank:
+            return None
+        try:
+            return int(val)
+        except ValueError:
+            print(red("  enter a number"))
+
+
+def ask_yes(prompt, default=True):
+    d = "Y/n" if default else "y/N"
+    while True:
+        val = ask("%s (%s)" % (prompt, d), "").lower()
+        if not val:
+            return default
+        if val in ("y", "yes"):
+            return True
+        if val in ("n", "no"):
+            return False
+
+
+def choose_device(devices, taken=None):
+    if not devices:
+        print(red("  no serial devices attached"))
+        return None
+    taken = taken or {}
+    print()
+    for i, d in enumerate(devices, 1):
+        if d["dev"] in taken:
+            tag = red("  in use by %s" % taken[d["dev"]])
+        elif d.get("serial"):
+            tag = dim("  serial %s" % d["serial"])
+        else:
+            tag = ""
+        print("   %s  %-46s %s%s" % (cyan("%2d" % i), device_label(d)[:46], d["dev"], tag))
+    while True:
+        val = ask("\n  device number (blank to cancel)")
+        if not val:
+            return None
+        try:
+            idx = int(val)
+            if 1 <= idx <= len(devices):
+                return devices[idx - 1]
+        except ValueError:
+            pass
+        print(red("  pick 1-%d" % len(devices)))
+
+
+def choose_model(device, current=None):
+    """Pick a Hamlib rig model, suggesting matches for the device."""
+    suggestions = suggest_models(device) if device else []
+    if suggestions:
+        print()
+        print(bold("  Suggested models for %s" % device_label(device)))
+        for i, m in enumerate(suggestions, 1):
+            status = "" if m["status"].lower() == "stable" else dim("  [%s]" % m["status"])
+            print("   %s  %-6d %s %s%s" % (cyan("%2d" % i), m["id"], m["mfg"], m["model"], status))
+        print(dim("   or type a model number, or a name to search"))
+    else:
+        print(dim("\n  type a Hamlib model number, or a name to search (e.g. 'ic-7300')"))
+
+    while True:
+        val = ask("\n  model", current)
+        if not val:
+            continue
+
+        if suggestions and val.isdigit() and 1 <= int(val) <= len(suggestions):
+            pick = int(val)
+            # a bare small number is ambiguous: menu index vs model id.
+            if pick <= len(suggestions):
+                return suggestions[pick - 1]["id"]
+
+        if val.isdigit():
+            mid = int(val)
+            if any(m["id"] == mid for m in rig_models()):
+                return mid
+            print(red("  no Hamlib model %d" % mid))
+            continue
+
+        needle = _norm(val)
+        hits = [m for m in rig_models()
+                if needle in _norm(m["model"]) or needle in _norm(m["mfg"] + m["model"])]
+        if not hits:
+            print(red("  nothing matches %r" % val))
+            continue
+        if len(hits) > 20:
+            print(yellow("  %d matches - be more specific" % len(hits)))
+            continue
+        print()
+        for m in hits:
+            status = "" if m["status"].lower() == "stable" else dim("  [%s]" % m["status"])
+            print("   %-6d %s %s%s" % (m["id"], m["mfg"], m["model"], status))
+        print(dim("   enter one of the model numbers above"))
+
+
+def ask_baud(current=None):
+    print(dim("\n  baud: " + "  ".join(str(b) for b in BAUD_CHOICES)
+              + "   (blank = let Hamlib use the rig default)"))
+    val = ask("  baud", current if current else "")
+    if not val:
+        return None
+    try:
+        return int(val)
+    except ValueError:
+        print(red("  not a number - using the rig default"))
+        return None
+
+
+def ask_port(cfg, current=None, profile_id=None):
+    if current is None:
+        current = next_free_port(cfg)
+    while True:
+        port = ask_int("  TCP port", current)
+        if not (1 <= port <= 65535):
+            print(red("  port must be 1-65535"))
+            continue
+        clash = [p for p in cfg["profiles"]
+                 if p.get("port") == port and p["id"] != profile_id]
+        if clash:
+            print(red("  port %d is already used by %r" % (port, clash[0]["name"])))
+            if not ask_yes("  use it anyway?", False):
+                continue
+        elif port_in_use(port):
+            print(yellow("  something is already listening on %d" % port))
+            if not ask_yes("  use it anyway?", False):
+                continue
+        return port
+
+
+# --------------------------------------------------------------------------
+# actions
+# --------------------------------------------------------------------------
+
+def device_users(cfg, dev, devices, exclude_id=None):
+    """Names of profiles already bound to this exact serial device."""
+    names = []
+    for p in cfg["profiles"]:
+        if p["id"] == exclude_id:
+            continue
+        d = match_device(p.get("device"), devices)
+        if d and d["dev"] == dev["dev"]:
+            names.append(p["name"])
+    return names
+
+
+def confirm_device(cfg, dev, devices, exclude_id=None):
+    """A serial interface belongs to exactly one daemon. False if it is taken."""
+    clash = device_users(cfg, dev, devices, exclude_id)
+    if not clash:
+        return True
+    print(red("\n  %s is already used by: %s" % (dev["dev"], ", ".join(clash))))
+    print(dim("  a serial interface cannot be shared - one daemon per interface."))
+    print(dim("  Bind to another interface on this radio, or delete that profile."))
+    return False
+
+
+def taken_devices(cfg, devices, exclude_id=None):
+    """Map of /dev path -> profile name for interfaces already claimed."""
+    taken = {}
+    for p in cfg["profiles"]:
+        if p["id"] == exclude_id:
+            continue
+        d = match_device(p.get("device"), devices)
+        if d:
+            taken[d["dev"]] = p["name"]
+    return taken
+
+
+def choose_radio(cfg, radios, devices):
+    """Pick a physical radio, showing how many of its interfaces are free."""
+    if not radios:
+        print(red("  no radios attached"))
+        return None
+    taken = taken_devices(cfg, devices)
+    print()
+    for i, g in enumerate(radios, 1):
+        free = [d for d in g["interfaces"] if d["dev"] not in taken]
+        detail = "%d interface%s" % (len(g["interfaces"]),
+                                     "" if len(g["interfaces"]) == 1 else "s")
+        if not free:
+            detail += ", all in use"
+        elif len(free) != len(g["interfaces"]):
+            detail += ", %d free" % len(free)
+        tag = dim("  serial %s" % g["serial"]) if g.get("serial") else ""
+        print("   %s  %-34s %s%s" % (cyan("%2d" % i), g["name"][:34],
+                                     dim(detail), tag))
+    while True:
+        val = ask("\n  radio number (blank to cancel)")
+        if not val:
+            return None
+        try:
+            idx = int(val)
+            if 1 <= idx <= len(radios):
+                return radios[idx - 1]
+        except ValueError:
+            pass
+        print(red("  pick 1-%d" % len(radios)))
+
+
+def choose_interfaces(free):
+    """Pick which of a radio's interfaces get a daemon."""
+    if len(free) == 1:
+        return list(free)
+    print(bold("\n  Interfaces on this radio"))
+    for i, d in enumerate(free, 1):
+        print("   %s  %-16s %s" % (cyan("%2d" % i), interface_label(d), d["dev"]))
+    print(dim("   each gets its own daemon on its own port"))
+    while True:
+        val = ask("\n  which? (e.g. 1, or 1,2, or 'all')", "all").strip().lower()
+        if val in ("all", "*"):
+            return list(free)
+        picks, ok = [], True
+        for part in val.replace(" ", "").split(","):
+            if not part.isdigit() or not (1 <= int(part) <= len(free)):
+                ok = False
+                break
+            if free[int(part) - 1] not in picks:
+                picks.append(free[int(part) - 1])
+        if ok and picks:
+            return picks
+        print(red("  pick 1-%d, comma separated, or 'all'" % len(free)))
+
+
+def new_profile(cfg, devices):
+    radios = group_devices(devices)
+    g = choose_radio(cfg, radios, devices)
+    if not g:
+        return
+
+    taken = taken_devices(cfg, devices)
+    free = [d for d in g["interfaces"] if d["dev"] not in taken]
+    if not free:
+        print(red("\n  every interface on %s already has a daemon" % g["name"]))
+        print(dim("  an interface cannot be shared - delete a profile to free one"))
+        return
+
+    # a radio already known to us keeps its name and model
+    existing = [pr for pr in cfg["profiles"] if profile_radio_key(pr) == g["key"]]
+    if existing:
+        radio_name = profile_radio_name(existing[0])
+        model = existing[0]["model"]
+        baud = existing[0].get("baud")
+        civ = existing[0].get("civaddr")
+        print(dim("\n  adding to %s (%s)" % (radio_name, model_name(model))))
+    else:
+        radio_name = ask("\n  radio name", g["name"])
+        model = choose_model(g["interfaces"][0])
+        baud = ask_baud()
+        civ = ask("  CI-V address (Icom only, blank for none)", "") or None
+
+    picks = choose_interfaces(free)
+    added = []
+    for d in picks:
+        print(bold("\n  %s  (%s)" % (interface_label(d), d["dev"])))
+        default_label = "interface %s" % d["interface"] if d.get("interface") is not None \
+            else "main"
+        if len(picks) == 1 and not existing:
+            default_label = "main"
+        label = ask("  what will use it?", default_label)
+        port = ask_port(cfg)
+
+        fp = fingerprint(d)
+        fp["dev"] = d["dev"]
+        profile = {
+            "id": unique_id(cfg, slugify("%s-%s" % (radio_name, label))),
+            "name": label,
+            "radio": {"key": g["key"], "name": radio_name, "serial": g.get("serial")},
+            "model": model,
+            "baud": baud,
+            "port": port,
+            "civaddr": civ or None,
+            "extra_args": [],
+            "device": fp,
+        }
+        cfg["profiles"].append(profile)
+        added.append(profile)
+        save_config(cfg)
+        print(dim("  " + " ".join(build_command(profile, d["dev"]))))
+
+    print(green("\n  saved ") + bold("%s" % radio_name)
+          + dim("  (%d daemon%s)" % (len(added), "" if len(added) == 1 else "s")))
+
+    if ask_yes("\n  start %s now?" % ("it" if len(added) == 1 else "them"), True):
+        for profile in added:
+            start_profile(profile, devices, cfg)
+
+
+def edit_profile(cfg, profile, devices):
+    print(bold("\n  editing %s" % profile["name"]))
+    profile["name"] = ask("  name", profile["name"])
+
+    dev = match_device(profile.get("device"), devices)
+    if dev:
+        print(dim("  device: %s (%s)" % (device_label(dev), dev["dev"])))
+        if ask_yes("  bind to a different device?", False):
+            nd = choose_device(devices, taken_devices(cfg, devices, profile["id"]))
+            if nd and not confirm_device(cfg, nd, devices, profile["id"]):
+                nd = None
+            if nd:
+                fp = fingerprint(nd)
+                fp["dev"] = nd["dev"]
+                profile["device"] = fp
+                dev = nd
+    else:
+        print(yellow("  saved device is not connected"))
+        if ask_yes("  bind to a connected device now?", True):
+            nd = choose_device(devices, taken_devices(cfg, devices, profile["id"]))
+            if nd and not confirm_device(cfg, nd, devices, profile["id"]):
+                nd = None
+            if nd:
+                fp = fingerprint(nd)
+                fp["dev"] = nd["dev"]
+                profile["device"] = fp
+                dev = nd
+
+    print(dim("  model: %s" % model_name(profile["model"])))
+    if ask_yes("  change model?", False):
+        profile["model"] = choose_model(dev, profile["model"])
+
+    profile["baud"] = ask_baud(profile.get("baud"))
+    profile["port"] = ask_port(cfg, profile["port"], profile["id"])
+    civ = ask("  CI-V address (blank for none)", profile.get("civaddr") or "")
+    profile["civaddr"] = civ or None
+    extra = ask("  extra rigctld arguments",
+                " ".join(profile.get("extra_args") or []))
+    profile["extra_args"] = extra.split() if extra else []
+
+    save_config(cfg)
+    print(green("  saved"))
+    if running_pid(profile) and ask_yes("  restart with the new settings?", True):
+        stop_profile(profile, quiet=True)
+        start_profile(profile, devices, cfg)
+
+
+def delete_profile(cfg, profile):
+    if not ask_yes("  delete %r?" % profile["name"], False):
+        return
+    stop_profile(profile, quiet=True)
+    cfg["profiles"] = [p for p in cfg["profiles"] if p["id"] != profile["id"]]
+    save_config(cfg)
+    for path in (pid_file(profile), log_file(profile)):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    print(green("  deleted"))
+
+
+def start_all(cfg, devices):
+    any_started = False
+    for p in cfg["profiles"]:
+        if match_device(p.get("device"), devices) and not running_pid(p):
+            start_profile(p, devices, cfg)
+            any_started = True
+    if not any_started:
+        print(dim("  nothing to start - every connected radio is already running"))
+
+
+def stop_all(cfg):
+    stopped = False
+    for p in cfg["profiles"]:
+        if running_pid(p):
+            stop_profile(p)
+            stopped = True
+    if not stopped:
+        print(dim("  nothing running"))
+
+
+# --------------------------------------------------------------------------
+# interactive loop
+# --------------------------------------------------------------------------
+
+MENU = """
+  {s} start    {k} stop     {r} restart   {t} test    {g} log
+  {n} new      {e} edit     {x} delete
+  {a} start all connected   {K} stop all
+  {m} shared memory limits (sysctl)
+  {v} show all serial devices (not just usbmodem)
+  {l} rescan   {q} quit
+"""
+
+
+def flat_profiles(cfg):
+    """Profiles in the order the menu numbers them (grouped by radio)."""
+    out = []
+    for _, profiles in radios_in_config(cfg):
+        out.extend(profiles)
+    return out
+
+
+def resolve_many(cfg, arg):
+    """Map '2', a daemon name, or a radio name to one or more daemons.
+
+    Naming a radio selects every daemon on it, which is usually what you want
+    when a radio drives several interfaces.
+    """
+    if not arg:
+        return []
+    flat = flat_profiles(cfg)
+
+    if arg.isdigit():
+        idx = int(arg)
+        return [flat[idx - 1]] if 1 <= idx <= len(flat) else []
+
+    needle = arg.lower().strip()
+
+    # a whole radio
+    for radio_name, profiles in radios_in_config(cfg):
+        if radio_name.lower() == needle:
+            return list(profiles)
+
+    # one daemon, by id or exact name
+    for p in flat:
+        if p["id"] == needle or p["name"].lower() == needle \
+                or full_name(p).lower() == needle:
+            return [p]
+
+    # substring, daemons first then radios
+    hits = [p for p in flat if needle in full_name(p).lower()]
+    if hits:
+        return hits
+    for radio_name, profiles in radios_in_config(cfg):
+        if needle in radio_name.lower():
+            return list(profiles)
+    return []
+
+
+def resolve(cfg, arg):
+    hits = resolve_many(cfg, arg)
+    return hits[0] if len(hits) == 1 else None
+
+
+def need_targets(cfg, arg, devices):
+    """One or more daemons for a command that can act on a whole radio."""
+    if not cfg["profiles"]:
+        print(yellow("  no radios configured yet"))
+        print(dim("  press 'n' to add one"))
+        return []
+
+    hits = resolve_many(cfg, arg)
+    if hits:
+        return hits
+
+    typed = arg
+    if not arg:
+        typed = ask("  which radio or daemon?")
+        hits = resolve_many(cfg, typed)
+        if hits:
+            return hits
+
+    if not typed:
+        return []
+
+    # the connected-radio list carries no handles, but people reasonably try
+    if re.fullmatch(r"d\d+", typed.strip(), re.I):
+        print(red("  %s is not a name" % typed))
+        print(dim("  that list is attached radios with no daemon yet - press 'n'"))
+        print(dim("  to configure one. This command takes a radio or daemon name."))
+        return []
+
+    print(red("  no such radio or daemon: %s" % typed))
+    print(dim("  known: %s" % ", ".join(full_name(x) for x in flat_profiles(cfg))))
+    return []
+
+
+def need_one(cfg, arg, devices):
+    """Exactly one daemon, for commands that cannot act on a whole radio."""
+    hits = need_targets(cfg, arg, devices)
+    if len(hits) == 1:
+        return hits[0]
+    if not hits:
+        return None
+    print(yellow("  that matches %d daemons:" % len(hits)))
+    flat = flat_profiles(cfg)
+    for p in hits:
+        print("   %s  %s" % (cyan("%2d" % (flat.index(p) + 1)), full_name(p)))
+    return resolve(cfg, ask("  which number?"))
+
+
+def rig_query(port, commands, timeout=4.0):
+    """Speak the rigctld network protocol directly.
+
+    Cheaper than shelling out to rigctl, works whether or not rigctl is on
+    PATH, and - unlike rigctl - it cannot block forever on a wedged daemon.
+    """
+    replies = []
+    with socket.create_connection(("127.0.0.1", port), timeout=timeout) as s:
+        s.settimeout(timeout)
+        for cmd in commands:
+            s.sendall((cmd + "\n").encode())
+            buf = b""
+            while b"\n" not in buf:
+                chunk = s.recv(256)
+                if not chunk:
+                    break
+                buf += chunk
+            replies.append(buf.decode(errors="replace").strip())
+    return replies
+
+
+def test_profile(profile):
+    """Ask the running daemon for frequency and mode."""
+    pid = running_pid(profile)
+    if not pid:
+        print(red("  %s is not running" % full_name(profile)))
+        return
+    try:
+        freq, mode = rig_query(profile["port"], ["f", "m"])
+    except (OSError, socket.timeout) as exc:
+        print(red("  could not reach the daemon on port %d: %s"
+                  % (profile["port"], type(exc).__name__)))
+        print(dim("  %s" % log_file(profile)))
+        return
+
+    # hamlib reports failures as "RPRT <negative errno>"
+    for reply in (freq, mode):
+        if reply.startswith("RPRT ") and reply.split()[-1] not in ("0", ""):
+            print(red("  %s: rig returned %s" % (full_name(profile), reply)))
+            print(dim("  the radio may be off, or another program may hold the port"))
+            return
+
+    try:
+        shown = "{:,}".format(int(freq.splitlines()[0])) + " Hz"
+    except (ValueError, IndexError):
+        shown = freq or "(no reply)"
+    mode_txt = " ".join(mode.split()) if mode else ""
+    print(green("  %s: " % full_name(profile)) + shown
+          + (dim("   mode %s" % mode_txt) if mode_txt else ""))
+
+
+def interactive():
+    cfg = load_config()
+    while True:
+        devices = discover_devices()
+        os.system("clear") if USE_COLOR else None
+        print(bold("  AB6A RigCtl") + dim("  -  rigctld manager"))
+        print_profiles(cfg, devices)
+        print_devices(cfg, devices)
+        print(MENU.format(s=cyan("s"), k=cyan("k"), r=cyan("r"), t=cyan("t"),
+                          g=cyan("g"), n=cyan("n"), e=cyan("e"), x=cyan("x"),
+                          a=cyan("a"), K=cyan("K"), m=cyan("m"), v=cyan("v"),
+                          l=cyan("l"), q=cyan("q")))
+        try:
+            raw = input("  > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if not raw:
+            continue
+
+        cmd, _, arg = raw.partition(" ")
+        arg = arg.strip()
+        print()
+
+        try:
+            if cmd in ("q", "quit", "exit"):
+                return 0
+            elif cmd in ("l", "rescan"):
+                cfg = load_config()
+                continue
+            elif cmd == "n":
+                new_profile(cfg, devices)
+            elif cmd == "a":
+                start_all(cfg, devices)
+            elif cmd == "K":
+                stop_all(cfg)
+            elif cmd == "m":
+                shm_menu(cfg)
+            elif cmd == "v":
+                global SHOW_ALL_DEVICES
+                SHOW_ALL_DEVICES = not SHOW_ALL_DEVICES
+                continue
+            elif cmd in ("s", "k", "r", "t"):
+                # naming a radio acts on every daemon it runs
+                for p in need_targets(cfg, arg, devices):
+                    if cmd == "s":
+                        start_profile(p, devices, cfg)
+                    elif cmd == "k":
+                        stop_profile(p)
+                    elif cmd == "r":
+                        stop_profile(p, quiet=True)
+                        start_profile(p, devices, cfg)
+                    elif cmd == "t":
+                        test_profile(p)
+            elif cmd in ("e", "x", "g"):
+                p = need_one(cfg, arg, devices)
+                if not p:
+                    pass
+                elif cmd == "e":
+                    edit_profile(cfg, p, devices)
+                elif cmd == "x":
+                    delete_profile(cfg, p)
+                elif cmd == "g":
+                    print(dim("  %s" % log_file(p)))
+                    tail_log(log_file(p), 20)
+            else:
+                print(red("  unknown command %r" % cmd))
+        except (EOFError, KeyboardInterrupt):
+            print(dim("\n  cancelled"))
+
+        try:
+            input(dim("\n  press return "))
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+
+
+# --------------------------------------------------------------------------
+# non-interactive subcommands
+# --------------------------------------------------------------------------
+
+USAGE = """usage: ab6a-rigctl [command]
+
+  (no command)     interactive manager
+  devices [--all]  list attached radios (--all: every serial device)
+  list | status    list saved radios and whether they are running
+  start [name|all] start daemons - a radio name starts every daemon on it
+  stop  [name|all] stop daemons (default: all)
+  restart [name]   stop then start
+  models [search]  list Hamlib rig models
+  shm [--apply] [--persist]
+                   show/raise the SysV shared memory limits some ham
+                   software needs (--persist writes /etc/sysctl.conf)
+"""
+
+
+def main(argv):
+    if not shutil.which("rigctld"):
+        die("rigctld not found on PATH - install it with: brew install hamlib")
+
+    if not argv:
+        if not sys.stdin.isatty():
+            print(USAGE, file=sys.stderr)
+            return 2
+        return interactive()
+
+    cmd, args = argv[0], argv[1:]
+    cfg = load_config()
+
+    if cmd in ("-h", "--help", "help"):
+        print(USAGE)
+        return 0
+
+    if cmd == "devices":
+        if "--all" in args or "-a" in args:
+            globals()["SHOW_ALL_DEVICES"] = True
+        devices = discover_devices()
+        if not devices:
+            print("no serial devices attached")
+            return 0
+        for d in devices:
+            print("%-46s %s%s" % (device_label(d)[:46], d["dev"],
+                                  "  serial %s" % d["serial"] if d.get("serial") else ""))
+        return 0
+
+    if cmd in ("shm", "sysctl"):
+        if "--apply" in args:
+            shm_report(cfg)
+            shm_apply(cfg)
+            if "--persist" in args:
+                shm_persist(cfg)
+        elif "--persist" in args:
+            shm_report(cfg)
+            shm_persist(cfg)
+        else:
+            pending = shm_report(cfg)
+            if pending:
+                print(dim("\n  run: ab6a-rigctl shm --apply [--persist]"))
+        return 0
+
+    if cmd == "models":
+        needle = _norm(args[0]) if args else ""
+        for m in rig_models():
+            if needle and needle not in _norm(m["mfg"] + m["model"]):
+                continue
+            print("%-6d %-12s %-24s %s" % (m["id"], m["mfg"], m["model"], m["status"]))
+        return 0
+
+    if cmd in ("list", "status", "ls"):
+        devices = discover_devices()
+        if not cfg["profiles"]:
+            print("no saved radios - run ab6a-rigctl with no arguments to add one")
+            return 0
+        for radio_name, profiles in radios_in_config(cfg):
+            print("%s  %s" % (bold(radio_name), dim(model_name(profiles[0]["model"]))))
+            for p in profiles:
+                state, pid, dev = profile_status(p, devices)
+                print("  %-18s port %-6d %-26s %s%s" % (
+                    p["name"][:18], p["port"],
+                    dev["dev"] if dev else "not connected",
+                    state, "  pid %d" % pid if pid else ""))
+        return 0
+
+    if cmd in ("start", "stop", "restart"):
+        devices = discover_devices()
+        target = args[0] if args else "all"
+
+        if target == "all":
+            targets = flat_profiles(cfg)
+        else:
+            # a radio name covers every daemon on that radio
+            targets = resolve_many(cfg, target)
+            if not targets:
+                die("no such radio or daemon: %s" % target)
+
+        if cmd in ("stop", "restart"):
+            for p in targets:
+                stop_profile(p, quiet=(target == "all"))
+        if cmd in ("start", "restart"):
+            for p in targets:
+                if target == "all" and not match_device(p.get("device"), devices):
+                    continue
+                start_profile(p, devices, cfg)
+        return 0
+
+    print(USAGE, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        print()
+        sys.exit(130)
