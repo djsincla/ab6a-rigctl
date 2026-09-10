@@ -107,7 +107,8 @@
     <img class="logo" src="icon.png" alt="AB6A RigCtl">
     <h1>AB6A RigCtl</h1>
     <p class="tag">rigctld, without the terminal</p>
-    <p class="sub">A macOS menu bar app that finds your radios and runs a Hamlib daemon for each one.</p>
+    <p class="sub">A macOS menu bar app that finds your radios and runs a Hamlib daemon for each one.<br>
+       <span style="font-size:13px">Requires <a href="https://hamlib.sourceforge.net/" style="color:var(--accent);text-decoration:none">Hamlib</a> &mdash; <code>brew install hamlib</code></span></p>
 
     <div class="demo">
       <div class="menu">
@@ -241,6 +242,45 @@ interface 3   class 10   CDC-Data  <span class="a">&rarr;</span>  /dev/cu.usbmod
 
 <section>
   <div class="wrap">
+    <h2>Hamlib is required</h2>
+    <p class="warn" style="margin-bottom:20px">
+      AB6A RigCtl does not bundle Hamlib and will not work without it. Hamlib provides
+      <code>rigctld</code> — the daemon this app starts, supervises and reads from — along with
+      the rig model table it uses to identify your radio. Install it first:
+    </p>
+<pre>brew install hamlib</pre>
+    <table style="margin-top:22px">
+      <tr><th>What</th><th>Why it is needed</th></tr>
+      <tr>
+        <td><code>rigctld</code></td>
+        <td>The daemon itself. One is launched per radio interface; it owns the serial
+            port and serves the rigctl protocol on a TCP port.</td>
+      </tr>
+      <tr>
+        <td><code>rigctl -l</code></td>
+        <td>The rig model table. Read once to populate the model picker and to turn a
+            radio's USB product name into a Hamlib model number.</td>
+      </tr>
+      <tr>
+        <td><code>libhamlib</code></td>
+        <td><span style="color:var(--muted)">Not used.</span> The app links no Hamlib
+            library — it speaks the rigctl network protocol over a plain socket, so it
+            has no third-party dynamic dependencies.</td>
+      </tr>
+    </table>
+    <p style="color:var(--muted);font-size:14px;margin-top:18px">
+      Developed and tested against <strong style="color:var(--ink)">Hamlib 4.7.2</strong>.
+      Anything recent enough to ship <code>rigctld</code> and the
+      <code>NET rigctl</code> backend should work, since the app depends on the protocol
+      rather than on a library ABI. Note that backend maturity varies by radio — an IC-7760
+      is <em style="font-style:normal;color:var(--accent)">Alpha</em> in Hamlib 4.7.2, which
+      the model picker shows you.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <h2>Install</h2>
 <p style="margin:0 0 18px">
       <a href="https://github.com/djsincla/ab6a-rigctl/releases/latest"
@@ -304,6 +344,7 @@ cd ab6a-rigctl &amp;&amp; ./build-app.sh --install</pre>
 
 <footer>
   <div class="wrap">
+    Help: <a href="mailto:AB6A.US@gmail.com">AB6A.US@gmail.com</a><br>
     GPL-2.0-or-later — the same licence Hamlib applies to its own programs.<br>
     Built on <a href="https://hamlib.sourceforge.net/">Hamlib</a>, which is licensed separately
     (libhamlib LGPL-2.1-or-later).

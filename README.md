@@ -10,6 +10,26 @@ without you starting daemons by hand.
 Ships with a terminal equivalent (`ab6a-rigctl`) that shares the same
 configuration.
 
+## Hamlib is required
+
+This does not bundle Hamlib and will not work without it:
+
+```sh
+brew install hamlib
+```
+
+Hamlib provides `rigctld` — the daemon this launches, supervises and reads from —
+and the rig model table (`rigctl -l`) used to identify your radio. It does *not*
+link `libhamlib`; it speaks the rigctl network protocol over a plain socket, so
+it has no third-party dynamic dependencies.
+
+Developed and tested against **Hamlib 4.7.2**. Backend maturity varies by radio —
+an IC-7760 is *Alpha* in 4.7.2, which the model picker shows you.
+
+## Help
+
+Questions or problems: **AB6A.US@gmail.com**
+
 ## Why
 
 `rigctld` has to be started by hand with the right model number, the right

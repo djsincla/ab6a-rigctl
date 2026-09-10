@@ -49,11 +49,12 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIconFile</key>          <string>RigCtl</string>
     <key>CFBundlePackageType</key>       <string>APPL</string>
     <key>CFBundleSignature</key>         <string>????</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
-    <key>CFBundleVersion</key>           <string>1</string>
+    <key>CFBundleShortVersionString</key><string>1.1</string>
+    <key>CFBundleVersion</key>           <string>2</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>LSMinimumSystemVersion</key>    <string>26.0</string>
     <key>NSHighResolutionCapable</key>   <true/>
+    <key>NSHumanReadableCopyright</key>  <string>GPL-2.0-or-later &#183; Help: AB6A.US@gmail.com</string>
     <!-- menu bar only: no Dock icon, no main window -->
     <key>LSUIElement</key>               <true/>
 </dict>

@@ -105,6 +105,12 @@ final class StatusController: NSObject, NSMenuDelegate {
         menu.addItem(stopAll)
 
         menu.addItem(.separator())
+
+        let about = NSMenuItem(title: "About AB6A RigCtl\u{2026}",
+                               action: #selector(showAbout), keyEquivalent: "")
+        about.target = self
+        menu.addItem(about)
+
         let quit = NSMenuItem(title: "Quit AB6A RigCtl", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
@@ -181,6 +187,48 @@ final class StatusController: NSObject, NSMenuDelegate {
         guard let id = sender.representedObject as? String,
               let p = state.profiles.first(where: { $0.id == id }) else { return }
         state.toggle(p)
+    }
+
+    private static let helpEmail = "AB6A.US@gmail.com"
+
+    @objc private func showAbout() {
+        let body = NSFont.systemFont(ofSize: 11)
+        let credits = NSMutableAttributedString()
+
+        credits.append(NSAttributedString(
+            string: "Runs a Hamlib rigctld daemon for each of your radio's "
+                  + "interfaces, so WSJT-X, fldigi and logging software have "
+                  + "something to connect to.\n\n",
+            attributes: [.font: body]))
+
+        credits.append(NSAttributedString(
+            string: "Help  ", attributes: [.font: NSFont.boldSystemFont(ofSize: 11)]))
+        credits.append(NSAttributedString(
+            string: Self.helpEmail + "\n",
+            attributes: [.font: body,
+                         .link: URL(string: "mailto:\(Self.helpEmail)")!,
+                         .foregroundColor: Self.accent]))
+
+        credits.append(NSAttributedString(
+            string: "Source  ", attributes: [.font: NSFont.boldSystemFont(ofSize: 11)]))
+        credits.append(NSAttributedString(
+            string: "github.com/djsincla/ab6a-rigctl\n\n",
+            attributes: [.font: body,
+                         .link: URL(string: "https://github.com/djsincla/ab6a-rigctl")!,
+                         .foregroundColor: Self.accent]))
+
+        credits.append(NSAttributedString(
+            string: "GPL-2.0-or-later, the licence Hamlib applies to its own "
+                  + "programs. Hamlib is installed separately and licensed "
+                  + "separately.",
+            attributes: [.font: NSFont.systemFont(ofSize: 10),
+                         .foregroundColor: NSColor.secondaryLabelColor]))
+
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .credits: credits,
+            NSApplication.AboutPanelOptionKey(rawValue: "ApplicationName"): "AB6A RigCtl",
+        ])
     }
 
     @objc private func openConfig() {
