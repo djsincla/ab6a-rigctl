@@ -199,14 +199,11 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
     private func interfaceRow(radio: Radio, iface: Interface) -> NSView {
         let existing = state.profiles.first { $0.match(in: [iface]) != nil }
 
-        let enable = NSButton(checkboxWithTitle: radio.portLabel(for: iface),
-                              target: nil, action: nil)
+        let enable = NSButton(checkboxWithTitle: iface.label, target: nil, action: nil)
         enable.state = existing != nil ? .on : .off
         enable.font = .systemFont(ofSize: 12)
 
-        var detail = iface.devicePath
-        if let usb = radio.usbDetail(for: iface) { detail += "   \(usb)" }
-        let path = label(detail, size: 11, secondary: true)
+        let path = label(iface.devicePath, size: 11, secondary: true)
 
         let name = NSTextField(string: existing?.name ?? defaultName(for: iface, on: radio))
         name.placeholderString = "what will use it"
@@ -237,9 +234,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func defaultName(for iface: Interface, on radio: Radio) -> String {
-        guard radio.interfaces.count > 1,
-              let idx = radio.interfaces.firstIndex(of: iface) else { return "main" }
-        return "port \(idx + 1)"
+        radio.interfaces.count == 1 ? "main" : (iface.interfaceNumber.map { "port \($0)" } ?? "main")
     }
 
     private func nextFreePort() -> Int {

@@ -80,6 +80,13 @@ errors and the rest looked fine — and that was read-only traffic. Across two
 different interfaces the same test was clean. Silent, intermittent corruption is
 worse than an outright failure.
 
+Interfaces are labelled by their USB `bInterfaceNumber`, which is why an
+IC-7760's two serial ports read as **interface 1** and **interface 3** rather
+than 1 and 2. A CDC-ACM radio spends two USB interfaces on each serial port —
+one for control, one for data — and only the data interface carries a `/dev`
+node. Nothing is missing: interface 2 is the control channel for the second
+port.
+
 ### Radios that cannot identify themselves
 
 A radio plugged in over native USB reports who it is. An IC-7760 is recognised as
