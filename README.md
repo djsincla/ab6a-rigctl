@@ -123,17 +123,6 @@ and interface number — not on the `/dev` path. Plug the radio into a different
 port, or a different hub, and it is still recognised; the new path is picked up
 at start.
 
-### Shared memory limits
-
-WSJT-X on macOS needs the SysV shared memory limits raised above the defaults,
-and macOS resets them every boot. `ab6a-rigctl shm` shows the current values and
-offers to raise them and to persist them in `/etc/sysctl.conf`:
-
-```sh
-sudo sysctl -w kern.sysv.shmall=25600
-sudo sysctl -w kern.sysv.shmmax=52428800
-```
-
 ## Command line
 
 ```
@@ -144,7 +133,6 @@ ab6a-rigctl start [name|all]   a radio name starts every daemon on it
 ab6a-rigctl stop  [name|all]   stop daemons
 ab6a-rigctl restart [name]
 ab6a-rigctl models [search]    search the Hamlib model list
-ab6a-rigctl shm [--apply] [--persist]
 ```
 
 ## Why a daemon, and why no Hamlib library
