@@ -111,20 +111,11 @@
        <span style="font-size:13px">Requires <a href="https://hamlib.sourceforge.net/" style="color:var(--accent);text-decoration:none">Hamlib</a> &mdash; <code>brew install hamlib</code></span></p>
 
     <div class="demo">
-      <div class="menu">
-        <div class="radio">IC-7760 <span>Icom IC-7760</span></div>
-        <div class="row on"><span class="dot"></span> main <span class="port">port 4532</span></div>
-        <div class="freq">14.321.000 MHz <em>PKTUSB</em></div>
-        <div class="row on"><span class="dot"></span> second <span class="port">port 4533</span></div>
-        <div class="freq">14.321.000 MHz <em>PKTUSB</em></div>
-        <hr>
-        <div class="act">Start all connected</div>
-        <div class="act dim">Stop all</div>
-        <hr>
-        <div class="act">Quit AB6A RigCtl</div>
-      </div>
+      <img src="menu.png" alt="The AB6A RigCtl menu, showing an IC-7760 with a running daemon on port 4532 reading 21.074.000 MHz"
+           style="width:265px;border-radius:12px;box-shadow:0 24px 60px rgba(0,0,0,.55);
+                  border:1px solid var(--line)">
     </div>
-    <p class="caption">One radio, two interfaces, two independent daemons.</p>
+    <p class="caption">Live frequency and mode, straight from the running daemon.</p>
   </div>
 </header>
 
@@ -189,32 +180,9 @@ interface 3   class 10   CDC-Data  <span class="a">&rarr;</span>  /dev/cu.usbmod
       In <strong style="color:var(--ink)">Configure radios&hellip;</strong> that looks like this:
     </p>
 
-    <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;
-                padding:18px 20px;font-size:13.5px">
-      <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
-        <span style="color:var(--muted);font-size:11px">Radio</span>
-        <span style="background:var(--ground);border:1px solid var(--line);border-radius:5px;
-                     padding:4px 10px;font-weight:600">IC-7760</span>
-        <span style="color:var(--muted);font-size:11px">Model</span>
-        <span style="background:var(--ground);border:1px solid var(--line);border-radius:5px;
-                     padding:4px 10px;color:var(--accent)">IC-7760 - Icom (3092, Alpha)</span>
-        <span style="color:var(--muted);font-size:11px">Baud</span>
-        <span style="background:var(--ground);border:1px solid var(--line);border-radius:5px;
-                     padding:4px 10px">115200</span>
-      </div>
-      <div style="padding-left:6px;line-height:2.1">
-        <div><span style="color:var(--accent)">&#9745;</span> interface 1
-          <span style="color:var(--muted)">&nbsp; /dev/cu.usbmodem114101 &nbsp; as</span>
-          <span style="color:var(--ink)">WSJT-X</span>
-          <span style="color:var(--muted)">&nbsp; TCP</span>
-          <span style="color:var(--accent);font-family:ui-monospace,Menlo,monospace">4532</span></div>
-        <div><span style="color:var(--accent)">&#9745;</span> interface 3
-          <span style="color:var(--muted)">&nbsp; /dev/cu.usbmodem114103 &nbsp; as</span>
-          <span style="color:var(--ink)">logging</span>
-          <span style="color:var(--muted)">&nbsp; TCP</span>
-          <span style="color:var(--accent);font-family:ui-monospace,Menlo,monospace">4533</span></div>
-      </div>
-    </div>
+    <img src="config.png" alt="The Configure radios window: an IC-7760 with model 3092, baud 115200, and its two interfaces each assignable to a TCP port"
+         style="width:100%;border-radius:10px;border:1px solid var(--line);
+                box-shadow:0 18px 44px rgba(0,0,0,.45)">
 
     <p style="color:var(--muted);font-size:15px;margin:18px 0 0">
       Point WSJT-X at <code style="color:var(--accent)">localhost:4532</code> and your logger at

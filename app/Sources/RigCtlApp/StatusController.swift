@@ -30,6 +30,69 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// Opens the menu and writes its screen rect (top-left origin, points) to
+    /// `path`, so a screenshot can be taken of exactly that region.
+    ///
+    /// The app pops its own menu rather than being driven from outside, which
+    /// keeps this from needing accessibility automation.
+    private var backdrop: NSWindow?
+
+    /// A plain dark sheet behind the menu, so its translucency picks up an even
+    /// backdrop instead of whatever happens to be on the desktop.
+    private func showBackdrop() {
+        guard let screen = NSScreen.main else { return }
+        let w = NSWindow(contentRect: screen.frame, styleMask: .borderless,
+                         backing: .buffered, defer: false)
+        w.backgroundColor = NSColor(calibratedRed: 0.051, green: 0.082, blue: 0.118, alpha: 1)
+        w.level = .normal
+        w.isOpaque = true
+        w.ignoresMouseEvents = true
+        w.orderFrontRegardless()
+        backdrop = w
+    }
+
+    func openMenuForCapture(frameFile path: String, holdFor seconds: TimeInterval) {
+        showBackdrop()
+        // menu tracking is modal, so the timers must be scheduled before the
+        // click and run in the tracking mode
+        let locate = Timer(timeInterval: 1.0, repeats: false) { _ in
+            let menuWindow = NSApp.windows.first {
+                $0.className.contains("Menu") && $0.isVisible
+            }
+            guard let w = menuWindow, let screen = NSScreen.screens.first else { return }
+            let f = w.frame
+            // AppKit is bottom-left origin; screencapture wants top-left
+            let top = screen.frame.height - f.maxY
+            let rect = "\(Int(f.origin.x)),\(Int(top)),\(Int(f.width)),\(Int(f.height))"
+            try? rect.write(toFile: path, atomically: true, encoding: .utf8)
+        }
+        let dismiss = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
+            self?.statusItem.menu?.cancelTracking()
+            NSApp.terminate(nil)
+        }
+        for t in [locate, dismiss] {
+            RunLoop.main.add(t, forMode: .common)
+            RunLoop.main.add(t, forMode: .eventTracking)
+        }
+        statusItem.button?.performClick(nil)
+    }
+
+    /// Same idea for the configuration window.
+    func openConfigForCapture(frameFile path: String, holdFor seconds: TimeInterval) {
+        openConfig()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let w = self?.configWindow?.window, let screen = NSScreen.screens.first
+            else { return }
+            let f = w.frame
+            let top = screen.frame.height - f.maxY
+            let rect = "\(Int(f.origin.x)),\(Int(top)),\(Int(f.width)),\(Int(f.height))"
+            try? rect.write(toFile: path, atomically: true, encoding: .utf8)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+            NSApp.terminate(nil)
+        }
+    }
+
     private func updateButton() {
         guard let button = statusItem.button else { return }
         let name = state.anyRunning

@@ -76,11 +76,17 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         }
         for radio in radios { stack.addArrangedSubview(section(for: radio)) }
 
+        // AppKit anchors an unflipped document view at the bottom, which leaves
+        // short content sitting under a gap. A flipped container pins it to the top.
+        let doc = FlippedView()
+        doc.translatesAutoresizingMaskIntoConstraints = false
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        doc.addSubview(stack)
+
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
-        scroll.documentView = stack
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = doc
 
         let save = NSButton(title: "Save", target: self, action: #selector(saveTapped))
         save.keyEquivalent = "\r"
@@ -105,9 +111,29 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
             root.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             root.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             root.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            stack.widthAnchor.constraint(equalTo: scroll.widthAnchor, constant: -2),
+
+            // the clip view drives the document's width and top; the stack
+            // drives its height
+            doc.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            doc.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            doc.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
+
+            stack.topAnchor.constraint(equalTo: doc.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: doc.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
         ])
         window.contentView = content
+
+        // fit the window to the content rather than leaving empty space
+        content.layoutSubtreeIfNeeded()
+        let needed = stack.fittingSize.height + 60
+        window.setContentSize(NSSize(width: 640, height: min(620, max(200, needed))))
+    }
+
+    /// Top-left origin, so scroll content starts at the top.
+    private final class FlippedView: NSView {
+        override var isFlipped: Bool { true }
     }
 
     @objc private func toggleShowAll() {

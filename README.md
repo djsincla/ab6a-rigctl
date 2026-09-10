@@ -10,6 +10,8 @@ without you starting daemons by hand.
 Ships with a terminal equivalent (`ab6a-rigctl`) that shares the same
 configuration.
 
+<img src="docs/menu.png" width="300" alt="The menu bar panel showing an IC-7760 with a running daemon">
+
 ## Hamlib is required
 
 This does not bundle Hamlib and will not work without it:

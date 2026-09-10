@@ -5,6 +5,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let status = StatusController()
     func applicationDidFinishLaunching(_ notification: Notification) {
         status.install()
+        // screenshot helper: pop the menu and publish its rect, then quit
+        if let frameFile = ProcessInfo.processInfo.environment["RIGCTL_MENU_FRAME"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [status] in
+                status.openMenuForCapture(frameFile: frameFile, holdFor: 8)
+            }
+        }
+        if let frameFile = ProcessInfo.processInfo.environment["RIGCTL_CONFIG_FRAME"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [status] in
+                status.openConfigForCapture(frameFile: frameFile, holdFor: 8)
+            }
+        }
     }
 }
 
