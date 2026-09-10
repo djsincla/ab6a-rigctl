@@ -172,11 +172,23 @@
 <section>
   <div class="wrap">
     <h2>Install</h2>
-<pre><span class="c"># Hamlib provides rigctld and libhamlib</span>
+<p style="margin:0 0 18px">
+      <a href="https://github.com/djsincla/ab6a-rigctl/releases/latest"
+         style="display:inline-block;background:var(--accent);color:#1a1005;font-weight:600;
+                padding:11px 22px;border-radius:8px;text-decoration:none;font-size:15px">
+        Download for Apple Silicon</a>
+      <span style="color:var(--muted);font-size:13px;margin-left:12px">macOS 26+ &middot; ad-hoc signed</span>
+    </p>
+<pre><span class="c"># Hamlib provides rigctld and libhamlib - required either way</span>
 brew install hamlib
 
-<span class="c"># build and install the app + CLI</span>
-./build-app.sh --install</pre>
+<span class="c"># first launch, since the build is not notarized:</span>
+<span class="c"># right-click the app and choose Open, or</span>
+xattr -dr com.apple.quarantine <span class="a">"/Applications/AB6A RigCtl.app"</span>
+
+<span class="c"># or build it yourself</span>
+git clone https://github.com/djsincla/ab6a-rigctl
+cd ab6a-rigctl &amp;&amp; ./build-app.sh --install</pre>
     <p style="color:var(--muted);font-size:14px;margin-top:14px">
       Installs <code>/Applications/AB6A RigCtl.app</code> and puts <code>ab6a-rigctl</code>
       on your <span style="color:var(--accent)">PATH</span>. The app lives in the menu bar

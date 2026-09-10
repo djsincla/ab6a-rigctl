@@ -17,7 +17,20 @@ configuration.
 whenever a radio is plugged into a different USB port. This keeps those details
 in a profile and works the device out for you each time.
 
-## Install
+## Download
+
+A compiled build is on the
+[releases page](https://github.com/djsincla/ab6a-rigctl/releases/latest) —
+Apple Silicon, macOS 26 or later. It is ad-hoc signed and not notarized, so the
+first launch needs a right-click → **Open**, or:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/AB6A RigCtl.app"
+```
+
+You still need Hamlib: `brew install hamlib`.
+
+## Build from source
 
 ```sh
 brew install hamlib          # provides rigctld and libhamlib
