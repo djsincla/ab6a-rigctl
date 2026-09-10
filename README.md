@@ -123,7 +123,7 @@ ab6a-rigctl models [search]    search the Hamlib model list
 ab6a-rigctl shm [--apply] [--persist]
 ```
 
-## Why a daemon rather than linking libhamlib
+## Why a daemon, and why no Hamlib library
 
 WSJT-X and logging software connect to `localhost:4532` and speak the rigctld
 network protocol — the daemon is the product, not an implementation detail. An
@@ -132,19 +132,25 @@ interface open and give those programs nothing to connect to, while becoming a
 second owner of a line that already has one. Replacing `rigctld` would mean
 reimplementing its TCP server.
 
-So `libhamlib` is linked only as a **NETRIGCTL client**: it talks to a running
-`rigctld` over TCP to read frequency and mode for the menu, and never opens a
-serial port.
+The app therefore links **no Hamlib library at all**. It runs `rigctld` and
+speaks the rigctl protocol to it over a plain socket to read frequency and mode
+for the menu. Linking `libhamlib` for `f` and `m` would have meant a C shim
+(Hamlib's API is largely function-like macros, which Swift cannot import) plus
+bundling and re-signing `libhamlib` and `libusb` to satisfy hardened-runtime
+library validation — a lot of machinery for two commands.
+
+One consequence worth having: the app has no third-party dynamic dependencies,
+so it signs and notarizes without any library-validation exemption.
 
 ## Layout
 
 | Path | What |
 |---|---|
 | `app/` | the menu bar app (Swift, AppKit) |
-| `app/Sources/CHamlib/shim.h` | C shims — Hamlib's API is largely function-like macros, which Swift cannot import |
 | `ab6a-rigctl` | the CLI (Python 3, standard library only) |
 | `make-icon.py` | regenerates `RigCtl.icns` (needs Pillow, build time only) |
 | `build-app.sh` | builds the app bundle; `--install` puts it in `/Applications` |
+| `notarize.sh` | submits the signed build to Apple and staples the ticket |
 | `docs/` | the project page |
 | `~/.config/ab6a-rigctl/profiles.json` | saved radios |
 | `~/.local/state/ab6a-rigctl/` | per-daemon pid and log files |

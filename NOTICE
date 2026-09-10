@@ -14,5 +14,8 @@ rigctld). Hamlib itself is dual-licensed:
 
 Hamlib is a separate work, not included here. It is available from
 https://hamlib.sourceforge.net/ and is installed separately (brew install
-hamlib). This program links libhamlib only as a NETRIGCTL client - it talks to
-a running rigctld over TCP and never opens a serial port itself.
+hamlib).
+
+This program does not link any Hamlib library. It runs rigctld as a separate
+process and speaks the rigctl network protocol to it over TCP. It never opens a
+serial port itself - the interface belongs to rigctld.

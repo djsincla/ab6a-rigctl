@@ -41,6 +41,24 @@ struct Radio: Identifiable, Hashable {
     let serialNumber: String?
     var interfaces: [Interface]
     var id: String { key }
+
+    /// How the operator should see a port: 1, 2, 3 - counted, not taken from
+    /// bInterfaceNumber.
+    ///
+    /// A CDC-ACM radio spends two USB interfaces on every serial port, one for
+    /// control and one for data, and only the data interface carries a tty. On
+    /// an IC-7760 that puts the two ports on bInterfaceNumber 1 and 3, which
+    /// says nothing useful to anyone configuring a radio.
+    func portLabel(for iface: Interface) -> String {
+        guard interfaces.count > 1 else { return "serial port" }
+        guard let idx = interfaces.firstIndex(of: iface) else { return iface.label }
+        return "serial port \(idx + 1)"
+    }
+
+    /// The underlying USB interface number, shown as secondary detail.
+    func usbDetail(for iface: Interface) -> String? {
+        iface.interfaceNumber.map { "USB interface \($0)" }
+    }
 }
 
 enum Discovery {

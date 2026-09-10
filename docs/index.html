@@ -215,14 +215,19 @@ cd ab6a-rigctl &amp;&amp; ./build-app.sh --install</pre>
 
 <section>
   <div class="wrap">
-    <h2>Why a daemon, not the library</h2>
-    <p style="color:var(--muted);font-size:15px;margin:0">
+    <h2>Why a daemon, and no Hamlib library</h2>
+    <p style="color:var(--muted);font-size:15px;margin:0 0 14px">
       WSJT-X, fldigi and logging software connect to <code style="color:var(--accent)">localhost:4532</code>
       and speak the rigctld network protocol — the daemon is the product, not an implementation
       detail. An app that drove the radio in-process through libhamlib would hold the serial
       interface open and give those programs nothing to connect to, while becoming a second
-      owner of a line that already has one. So libhamlib is linked only as a NETRIGCTL client:
-      it talks to rigctld over TCP, and never opens a serial port.
+      owner of a line that already has one.
+    </p>
+    <p style="color:var(--muted);font-size:15px;margin:0">
+      So the app links <strong style="color:var(--ink)">no Hamlib library at all</strong>. It runs
+      rigctld and speaks the rigctl protocol to it over a plain socket. That leaves it with no
+      third-party dynamic dependencies, which is also why it signs and notarizes without a
+      library-validation exemption.
     </p>
   </div>
 </section>

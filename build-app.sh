@@ -60,8 +60,26 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-codesign --force --deep --sign - "$APP" 2>/dev/null \
-    && echo "    signed (ad-hoc)" || echo "    codesign unavailable - still runs"
+# ---------------------------------------------------------------------------
+# Signing.
+#
+# The app links no third-party dylibs, so a Developer ID signature with the
+# hardened runtime is all notarization needs - nothing to bundle, no
+# library-validation exemption.
+DEV_ID=$(security find-identity -v -p codesigning 2>/dev/null \
+    | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
+
+if [ -n "$DEV_ID" ] && [ "${SKIP_SIGN:-}" != "1" ]; then
+    codesign --force --timestamp --options runtime --sign "$DEV_ID" \
+        "$APP/Contents/Resources/ab6a-rigctl"
+    codesign --force --timestamp --options runtime --sign "$DEV_ID" "$APP"
+    echo "    signed: $DEV_ID (hardened runtime)"
+    codesign --verify --deep --strict "$APP" && echo "    signature verifies"
+else
+    codesign --force --deep --sign - "$APP" 2>/dev/null \
+        && echo "    signed (ad-hoc - not notarizable)" \
+        || echo "    codesign unavailable - still runs"
+fi
 
 echo "==> built $APP"
 

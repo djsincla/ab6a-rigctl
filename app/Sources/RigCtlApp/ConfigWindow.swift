@@ -199,11 +199,14 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
     private func interfaceRow(radio: Radio, iface: Interface) -> NSView {
         let existing = state.profiles.first { $0.match(in: [iface]) != nil }
 
-        let enable = NSButton(checkboxWithTitle: iface.label, target: nil, action: nil)
+        let enable = NSButton(checkboxWithTitle: radio.portLabel(for: iface),
+                              target: nil, action: nil)
         enable.state = existing != nil ? .on : .off
         enable.font = .systemFont(ofSize: 12)
 
-        let path = label(iface.devicePath, size: 11, secondary: true)
+        var detail = iface.devicePath
+        if let usb = radio.usbDetail(for: iface) { detail += "   \(usb)" }
+        let path = label(detail, size: 11, secondary: true)
 
         let name = NSTextField(string: existing?.name ?? defaultName(for: iface, on: radio))
         name.placeholderString = "what will use it"
@@ -234,7 +237,9 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func defaultName(for iface: Interface, on radio: Radio) -> String {
-        radio.interfaces.count == 1 ? "main" : (iface.interfaceNumber.map { "port \($0)" } ?? "main")
+        guard radio.interfaces.count > 1,
+              let idx = radio.interfaces.firstIndex(of: iface) else { return "main" }
+        return "port \(idx + 1)"
     }
 
     private func nextFreePort() -> Int {
@@ -264,7 +269,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
             out.append("   model   \(f.model.stringValue.isEmpty ? "(none - pick one)" : f.model.stringValue)")
             out.append("   choices \(f.model.numberOfItems) models, baud \(f.baud.titleOfSelectedItem ?? "?")")
             for row in rows where row.iface.radioKey == radio.key {
-                out.append("   [\(row.enable.state == .on ? "x" : " ")] \(row.iface.label)"
+                out.append("   [\(row.enable.state == .on ? "x" : " ")] \(row.enable.title)"
                            + "  \(row.iface.devicePath)"
                            + "  as \(row.name.stringValue)  TCP \(row.port.stringValue)")
             }
@@ -292,7 +297,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
                 return
             }
             guard let port = Int(row.port.stringValue), (1...65535).contains(port) else {
-                alert("\(row.iface.label): TCP port must be a number from 1 to 65535.")
+                alert("\(row.enable.title): TCP port must be a number from 1 to 65535.")
                 return
             }
             if let other = seenPorts[port] {
@@ -300,12 +305,12 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
                       detail: "\(other) already uses it. Give each daemon its own port.")
                 return
             }
-            seenPorts[port] = row.iface.label
+            seenPorts[port] = row.enable.title
 
             let radioName = fields.name.stringValue.trimmingCharacters(in: .whitespaces)
             let finalRadioName = radioName.isEmpty ? row.iface.radioName : radioName
             let ifaceName = row.name.stringValue.trimmingCharacters(in: .whitespaces)
-            let finalIfaceName = ifaceName.isEmpty ? row.iface.label : ifaceName
+            let finalIfaceName = ifaceName.isEmpty ? row.enable.title : ifaceName
             let baudIndex = fields.baud.indexOfSelectedItem
             let baud = baudIndex > 0 ? Self.bauds[baudIndex] : nil
             let civ = fields.civ.stringValue.trimmingCharacters(in: .whitespaces)
