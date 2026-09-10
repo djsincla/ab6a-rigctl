@@ -157,6 +157,76 @@
 
 <section>
   <div class="wrap">
+    <h2>Ports are named as the radio reports them</h2>
+    <p style="color:var(--muted);font-size:15px;margin:0 0 18px">
+      An IC-7760 presents two serial ports over one USB cable, and they appear as
+      <strong style="color:var(--ink)">interface 1</strong> and
+      <strong style="color:var(--ink)">interface 3</strong> — not 1 and 2. That is not a gap;
+      it is what the USB descriptor actually says:
+    </p>
+<pre><span class="c">interface 0   class 2    Communications (CDC control)   </span><span class="a">&#9488;</span><span class="c"> serial port one</span>
+interface 1   class 10   CDC-Data  <span class="a">&rarr;</span>  /dev/cu.usbmodem114101   <span class="a">&#9496;</span>
+<span class="c">interface 2   class 2    Communications (CDC control)   </span><span class="a">&#9488;</span><span class="c"> serial port two</span>
+interface 3   class 10   CDC-Data  <span class="a">&rarr;</span>  /dev/cu.usbmodem114103   <span class="a">&#9496;</span></pre>
+    <p style="color:var(--muted);font-size:15px;margin:18px 0 0">
+      Every CDC-ACM serial port costs <em style="color:var(--ink);font-style:normal">two</em>
+      USB interfaces — one for control, one for data — and only the data half gets a
+      <code>/dev</code> node. Interface 2 is alive and well: it is the control channel for the
+      second port, and simply carries no tty. AB6A RigCtl shows the number the descriptor
+      reports rather than renumbering them, so what you see here matches what
+      <code>ioreg</code> and Hamlib see.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>A worked example: one IC-7760, two daemons</h2>
+    <p style="color:var(--muted);font-size:15px;margin:0 0 18px">
+      The 7760 answers CI-V on both interfaces, so each can carry its own daemon on its own
+      port — one for digital modes, one for logging — without them contending for the radio.
+      In <strong style="color:var(--ink)">Configure radios&hellip;</strong> that looks like this:
+    </p>
+
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;
+                padding:18px 20px;font-size:13.5px">
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
+        <span style="color:var(--muted);font-size:11px">Radio</span>
+        <span style="background:var(--ground);border:1px solid var(--line);border-radius:5px;
+                     padding:4px 10px;font-weight:600">IC-7760</span>
+        <span style="color:var(--muted);font-size:11px">Model</span>
+        <span style="background:var(--ground);border:1px solid var(--line);border-radius:5px;
+                     padding:4px 10px;color:var(--accent)">IC-7760 - Icom (3092, Alpha)</span>
+        <span style="color:var(--muted);font-size:11px">Baud</span>
+        <span style="background:var(--ground);border:1px solid var(--line);border-radius:5px;
+                     padding:4px 10px">115200</span>
+      </div>
+      <div style="padding-left:6px;line-height:2.1">
+        <div><span style="color:var(--accent)">&#9745;</span> interface 1
+          <span style="color:var(--muted)">&nbsp; /dev/cu.usbmodem114101 &nbsp; as</span>
+          <span style="color:var(--ink)">WSJT-X</span>
+          <span style="color:var(--muted)">&nbsp; TCP</span>
+          <span style="color:var(--accent);font-family:ui-monospace,Menlo,monospace">4532</span></div>
+        <div><span style="color:var(--accent)">&#9745;</span> interface 3
+          <span style="color:var(--muted)">&nbsp; /dev/cu.usbmodem114103 &nbsp; as</span>
+          <span style="color:var(--ink)">logging</span>
+          <span style="color:var(--muted)">&nbsp; TCP</span>
+          <span style="color:var(--accent);font-family:ui-monospace,Menlo,monospace">4533</span></div>
+      </div>
+    </div>
+
+    <p style="color:var(--muted);font-size:15px;margin:18px 0 0">
+      Point WSJT-X at <code style="color:var(--accent)">localhost:4532</code> and your logger at
+      <code style="color:var(--accent)">localhost:4533</code>, both as
+      <em style="font-style:normal;color:var(--ink)">Hamlib NET rigctl</em>. The radio is
+      identified from its own USB descriptor, so model 3092 is filled in for you — Hamlib
+      never probes the rig.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <h2>An interface is never shared</h2>
     <p class="warn">
       Exactly one daemon owns each serial interface. Two daemons on one interface
@@ -177,18 +247,18 @@
          style="display:inline-block;background:var(--accent);color:#1a1005;font-weight:600;
                 padding:11px 22px;border-radius:8px;text-decoration:none;font-size:15px">
         Download for Apple Silicon</a>
-      <span style="color:var(--muted);font-size:13px;margin-left:12px">macOS 26+ &middot; ad-hoc signed</span>
+      <span style="color:var(--muted);font-size:13px;margin-left:12px">macOS 26+ &middot; signed &amp; notarized</span>
     </p>
-<pre><span class="c"># Hamlib provides rigctld and libhamlib - required either way</span>
+<pre><span class="c"># Hamlib provides rigctld - required either way</span>
 brew install hamlib
-
-<span class="c"># first launch, since the build is not notarized:</span>
-<span class="c"># right-click the app and choose Open, or</span>
-xattr -dr com.apple.quarantine <span class="a">"/Applications/AB6A RigCtl.app"</span>
 
 <span class="c"># or build it yourself</span>
 git clone https://github.com/djsincla/ab6a-rigctl
 cd ab6a-rigctl &amp;&amp; ./build-app.sh --install</pre>
+    <p style="color:var(--muted);font-size:13px;margin:12px 0 0">
+      The download is signed with a Developer ID and notarized by Apple, with the ticket
+      stapled — it opens normally, with no right-click or quarantine step.
+    </p>
     <p style="color:var(--muted);font-size:14px;margin-top:14px">
       Installs <code>/Applications/AB6A RigCtl.app</code> and puts <code>ab6a-rigctl</code>
       on your <span style="color:var(--accent)">PATH</span>. The app lives in the menu bar

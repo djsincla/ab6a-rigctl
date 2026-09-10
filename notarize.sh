@@ -22,11 +22,20 @@ ZIP="AB6A-RigCtl-${VERSION}.zip"
 [ -d "$APP" ] || { echo "no build - run ./build-app.sh first" >&2; exit 1; }
 
 echo "==> checking the signature is notarizable"
-if ! codesign -dv "$APP" 2>&1 | grep -q "flags=.*runtime"; then
-    echo "    the app is not signed with the hardened runtime." >&2
-    echo "    ./build-app.sh signs it automatically when a Developer ID cert exists." >&2
-    exit 1
-fi
+# capture rather than pipe into grep -q: grep exits on the first match, codesign
+# takes SIGPIPE, and under `set -o pipefail` that reads as a failed check
+SIGINFO=$(codesign -dv "$APP" 2>&1 || true)
+case "$SIGINFO" in
+    *"flags="*runtime*) ;;
+    *)
+        echo "    the app is not signed with the hardened runtime." >&2
+        echo "    ./build-app.sh signs it automatically when a Developer ID cert exists." >&2
+        exit 1 ;;
+esac
+case "$SIGINFO" in
+    *"TeamIdentifier=HG979YFABK"*) ;;
+    *) echo "    warning: unexpected team identifier" >&2 ;;
+esac
 codesign --verify --deep --strict --verbose=1 "$APP"
 
 echo "==> submitting to Apple"

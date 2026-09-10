@@ -21,14 +21,11 @@ in a profile and works the device out for you each time.
 
 A compiled build is on the
 [releases page](https://github.com/djsincla/ab6a-rigctl/releases/latest) —
-Apple Silicon, macOS 26 or later. It is ad-hoc signed and not notarized, so the
-first launch needs a right-click → **Open**, or:
+Apple Silicon, macOS 26 or later. It is signed with a Developer ID and notarized
+by Apple, with the ticket stapled, so it opens normally with no right-click or
+quarantine step.
 
-```sh
-xattr -dr com.apple.quarantine "/Applications/AB6A RigCtl.app"
-```
-
-You still need Hamlib: `brew install hamlib`.
+You still need Hamlib for `rigctld`: `brew install hamlib`.
 
 ## Build from source
 
