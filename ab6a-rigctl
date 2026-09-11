@@ -65,14 +65,24 @@ SHM_DEFAULTS = [
 ]
 SYSCTL_CONF = "/etc/sysctl.conf"
 
-# Radios are reached through /dev/cu.usbmodem* only; everything else on the bus
-# (USB-serial bridges, Bluetooth ports, the debug console) is hidden unless the
-# device list is unfiltered with the 'v' toggle or --all.
+# Devices are picked from /dev/cu.usbmodem* by default; a radio on a USB-serial
+# bridge lives elsewhere and appears once the list is unfiltered with the 'v'
+# toggle or --all.
+#
+# Matching always considers every device, whatever the filter says - otherwise a
+# device configured while unfiltered would stop resolving afterwards.
 DEV_MATCH = re.compile(r"^/dev/cu\.usbmodem", re.I)
+NEVER_DEVICES = {"/dev/cu.Bluetooth-Incoming-Port", "/dev/cu.debug-console"}
 SHOW_ALL_DEVICES = False
 
 
 def is_candidate(dev_path):
+    """Could this ever be a device? Used for discovery, not for the pick list."""
+    return dev_path not in NEVER_DEVICES
+
+
+def is_selectable(dev_path):
+    """Should it be offered when choosing a device to configure?"""
     return SHOW_ALL_DEVICES or bool(DEV_MATCH.match(dev_path))
 
 
@@ -792,7 +802,8 @@ def print_devices(cfg, devices, only_unused=True):
     radios = group_devices(devices)
     shown = []
     for g in radios:
-        free = [d for d in g["interfaces"] if d["dev"] not in taken]
+        free = [d for d in g["interfaces"]
+                if d["dev"] not in taken and is_selectable(d["dev"])]
         if only_unused and not free:
             continue
         shown.append((g, free))
@@ -1026,7 +1037,9 @@ def taken_devices(cfg, devices, exclude_id=None):
 
 
 def choose_radio(cfg, radios, devices):
-    """Pick a physical radio, showing how many of its interfaces are free."""
+    """Pick a physical device, showing how many of its interfaces are free."""
+    radios = [g for g in radios
+              if any(is_selectable(d["dev"]) for d in g["interfaces"])]
     if not radios:
         print(red("  no radios attached"))
         return None
@@ -1087,7 +1100,8 @@ def new_profile(cfg, devices):
         return
 
     taken = taken_devices(cfg, devices)
-    free = [d for d in g["interfaces"] if d["dev"] not in taken]
+    free = [d for d in g["interfaces"]
+            if d["dev"] not in taken and is_selectable(d["dev"])]
     if not free:
         print(red("\n  every interface on %s already has a daemon" % g["name"]))
         print(dim("  an interface cannot be shared - delete a profile to free one"))
@@ -1534,7 +1548,7 @@ def main(argv):
     if cmd == "devices":
         if "--all" in args or "-a" in args:
             globals()["SHOW_ALL_DEVICES"] = True
-        devices = discover_devices()
+        devices = [d for d in discover_devices() if is_selectable(d["dev"])]
         if not devices:
             print("no serial devices attached")
             return 0
