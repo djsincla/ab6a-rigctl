@@ -45,7 +45,14 @@ final class RigPoller: @unchecked Sendable {
             clients[id] = nil
             cache[id] = nil
         }
+        let needsFirstRead = pairs.contains { cache[$0.id] == nil }
         lock.unlock()
+
+        // Read straight away rather than waiting for the next tick, so a menu
+        // opened moments after launch is not showing "reading..." for a second.
+        if needsFirstRead {
+            queue.async { [weak self] in self?.sweep() }
+        }
     }
 
     func reading(_ id: String) -> RigClient.Reading? {
