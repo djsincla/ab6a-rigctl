@@ -165,10 +165,23 @@
       <tr><td>Amplifier</td><td><code>ampctld</code></td><td><code>4531</code></td><td>5</td>
           <td>SWR</td></tr>
     </table>
-    <p style="color:var(--muted);font-size:14px;margin-top:18px">
-      Ports are assigned from each type's Hamlib default and step over the others', so adding a
-      second radio never claims the port a rotator will want.
-    </p>
+    <div style="display:flex;gap:28px;align-items:flex-start;margin-top:26px;flex-wrap:wrap">
+      <img src="devices.png" alt="The menu showing a radio, a rotator and an amplifier, each with its own live readout"
+           style="width:268px;border-radius:12px;border:1px solid var(--line);
+                  box-shadow:0 18px 44px rgba(0,0,0,.45)">
+      <div style="flex:1;min-width:240px">
+        <p style="color:var(--muted);font-size:14px;margin:0 0 14px">
+          Ports are assigned from each type's Hamlib default and step over the others', so adding
+          a second radio never claims the port a rotator will want.
+        </p>
+        <p style="color:var(--muted);font-size:13px;margin:0">
+          The rotator and amplifier here are Hamlib's <strong style="color:var(--ink)">dummy
+          backends</strong>, shown next to a real IC-7760 &mdash; which is also how the support was
+          developed and tested. The rotator is mid-slew, which is why its azimuth has not reached
+          the commanded heading yet.
+        </p>
+      </div>
+    </div>
   </div>
 </section>
 
