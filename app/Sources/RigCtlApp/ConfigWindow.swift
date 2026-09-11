@@ -79,6 +79,35 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         }
         for radio in radios { stack.addArrangedSubview(section(for: radio)) }
 
+        // Configured devices that are not attached have no rows to untick, so
+        // without this they could never be removed from here at all.
+        let visible = Set(radios.map { $0.key })
+        var absentSeen = Set<String>()
+        var absent: [(key: String, name: String, profiles: [Profile])] = []
+        for p in state.profiles {
+            guard let key = p.radio?.key, !visible.contains(key),
+                  !absentSeen.contains(key) else { continue }
+            absentSeen.insert(key)
+            absent.append((key, p.radioName,
+                           state.profiles.filter { $0.radio?.key == key }))
+        }
+        if !absent.isEmpty {
+            stack.addArrangedSubview(label("Configured, not attached", size: 11, secondary: true))
+            for entry in absent {
+                let name = label(entry.name, size: 13)
+                name.font = .systemFont(ofSize: 13, weight: .semibold)
+                let ports = entry.profiles.map { "\($0.name) \u{00B7} \($0.port)" }
+                    .joined(separator: ",  ")
+                let row = NSStackView(views: [
+                    name, label(ports, size: 11, secondary: true),
+                    removeButton(key: entry.key, name: entry.name),
+                ])
+                row.orientation = .horizontal
+                row.spacing = 10
+                stack.addArrangedSubview(row)
+            }
+        }
+
         // AppKit anchors an unflipped document view at the bottom, which leaves
         // short content sitting under a gap. A flipped container pins it to the top.
         let doc = FlippedView()
@@ -154,11 +183,14 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         name.font = .systemFont(ofSize: 13, weight: .semibold)
         name.widthAnchor.constraint(equalToConstant: 190).isActive = true
 
-        var headBits: [NSView] = [label("Radio", size: 11, secondary: true), name]
+        var headBits: [NSView] = [label("Device", size: 11, secondary: true), name]
         if let serial = radio.serialNumber {
             headBits.append(label("serial \(serial)", size: 11, secondary: true))
         } else if let path = first?.devicePath {
             headBits.append(label(path, size: 11, secondary: true))
+        }
+        if existing != nil {
+            headBits.append(removeButton(key: radio.key, name: radio.name))
         }
         let header = NSStackView(views: headBits)
         header.orientation = .horizontal
@@ -260,6 +292,54 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    private func removeButton(key: String, name: String) -> NSButton {
+        let b = NSButton(title: "\u{2715}", target: self, action: #selector(removeTapped(_:)))
+        b.bezelStyle = .circular
+        b.controlSize = .small
+        b.font = .systemFont(ofSize: 10)
+        b.identifier = NSUserInterfaceItemIdentifier(key)
+        b.toolTip = "Remove \(name) and every daemon configured for it"
+        return b
+    }
+
+    /// Deleting is immediate rather than deferred to Save: a device that is not
+    /// attached has no row to untick, so there would be nothing for Save to act
+    /// on.
+    @objc private func removeTapped(_ sender: NSButton) {
+        guard let key = sender.identifier?.rawValue else { return }
+        let doomed = state.profiles.filter { p in
+            if p.radio?.key == key { return true }
+            // also anything bound to this physical device's interfaces
+            if let radio = state.radios.first(where: { $0.key == key }) {
+                return p.match(in: radio.interfaces) != nil
+            }
+            return false
+        }
+        guard !doomed.isEmpty, let window else { return }
+
+        let names = doomed.map { $0.fullName }.joined(separator: ", ")
+        let alert = NSAlert()
+        alert.messageText = doomed.count == 1
+            ? "Remove \(doomed[0].fullName)?"
+            : "Remove \(doomed.count) daemons?"
+        alert.informativeText = doomed.count == 1
+            ? "Its daemon will be stopped and the configuration deleted."
+            : "\(names) will be stopped and their configuration deleted."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn, let self else { return }
+            for p in doomed { Daemons.stop(p) }
+            let keep = self.state.profiles.filter { kept in
+                !doomed.contains { $0.id == kept.id }
+            }
+            try? Store.save(keep)
+            self.onSave()
+            self.rebuild()
+        }
+    }
+
     private func column(_ views: [NSView]) -> NSStackView {
         let box = NSStackView(views: views)
         box.orientation = .vertical
@@ -339,6 +419,10 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
     func selfTest() -> [String] {
         var out: [String] = []
         out.append("show all serial devices: \(showAll.state == .on)")
+        out.append("discovery: \(state.radios.count) devices, selectable: \(state.selectableRadios.count), fields: \(radioFields.count)")
+        for r in state.radios {
+            out.append("   seen: \(r.name)  \(r.interfaces.map { $0.devicePath }.joined(separator: " "))")
+        }
         for radio in state.selectableRadios {
             guard let f = radioFields[radio.key] else { continue }
             out.append("\(f.name.stringValue)")
