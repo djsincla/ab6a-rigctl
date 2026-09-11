@@ -3,7 +3,6 @@ import Foundation
 struct DaemonStatus {
     var pid: Int32?
     var devicePath: String?
-    var reading: RigClient.Reading?
     var lastError: String?
     var running: Bool { pid != nil }
     var connected: Bool { devicePath != nil }
@@ -19,20 +18,14 @@ final class AppState {
     /// Called on the main actor whenever anything above changes.
     var onChange: (() -> Void)?
 
-    private var clients: [String: RigClient] = [:]
-    private var pollTask: Task<Void, Never>?
+    /// Background polling, independent of the main run loop.
+    let poller = RigPoller()
 
     init() {
         refresh()
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
-                self?.refresh()
-            }
-        }
+        // polling is driven by StatusController, which needs it to keep running
+        // while a menu is tracking events
     }
-
-    deinit { pollTask?.cancel() }
 
     var anyRunning: Bool { status.values.contains { $0.running } }
 
@@ -91,32 +84,22 @@ final class AppState {
         for p in loaded {
             let pid = Daemons.runningPID(p)
             let iface = p.match(in: ifaces)
-            var st = DaemonStatus(pid: pid, devicePath: iface?.devicePath,
-                                  reading: nil, lastError: status[p.id]?.lastError)
-            if pid != nil {
-                let client = clients[p.id] ?? {
-                    let c = RigClient(port: p.port)
-                    clients[p.id] = c
-                    return c
-                }()
-                st.reading = client.read()
-            } else {
-                clients[p.id]?.close()
-                clients[p.id] = nil
-            }
+            let st = DaemonStatus(pid: pid, devicePath: iface?.devicePath,
+                                  lastError: status[p.id]?.lastError)
             next[p.id] = st
         }
-        // drop clients for daemons that vanished from the config
-        for id in clients.keys where next[id] == nil {
-            clients[id]?.close()
-            clients[id] = nil
-        }
-
         profiles = loaded
         radios = found
         status = next
+        poller.setTargets(loaded.compactMap { p in
+            next[p.id]?.running == true ? (id: p.id, port: p.port) : nil
+        })
         onChange?()
     }
+
+    /// Latest cached reading for a daemon. Safe to call from a menu-tracking
+    /// run loop: it takes a lock, never waits on the main actor.
+    func reading(_ id: String) -> RigClient.Reading? { poller.reading(id) }
 
     func toggle(_ p: Profile) {
         if status[p.id]?.running == true { stop(p) } else { start(p) }

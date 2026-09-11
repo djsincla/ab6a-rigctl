@@ -12,22 +12,52 @@ final class StatusController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var timer: Timer?
     private var configWindow: ConfigWindowController?
+    /// The reading line for each daemon, kept so it can be refreshed in place
+    /// while the menu is open - rebuilding a tracking menu would close it.
+    private var readingItems: [String: NSMenuItem] = [:]
+    private var menuOpen = false
+    private var tick = 0
 
-    /// The amber of the app icon's radiating arcs.
+    /// The amber of the app icon's radiating arcs, for the menu bar glyph.
     private static let accent = NSColor(calibratedRed: 0.94, green: 0.55, blue: 0.13, alpha: 1)
+
+    /// Frequency readout. Menu items are drawn dimmed when disabled, so this is
+    /// a deeper, heavier orange than the icon tint - and it flips lighter in a
+    /// dark menu, where a dark orange would disappear.
+    private static let frequencyColor = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(calibratedRed: 1.00, green: 0.62, blue: 0.24, alpha: 1)
+            : NSColor(calibratedRed: 0.76, green: 0.29, blue: 0.01, alpha: 1)
+    }
+
+    /// Radio name and mode sit above secondary grey so they stay legible.
+    private static let nameColor = NSColor.labelColor
+    private static let modeColor = NSColor.labelColor.withAlphaComponent(0.88)
+    private static let detailColor = NSColor.labelColor.withAlphaComponent(0.70)
 
     func install() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
         menu.delegate = self
+        // AppKit dims disabled items, which washes out the radio name, the
+        // reading and the mode no matter what colour they are given. Managing
+        // enablement by hand lets informational rows keep their real colour.
+        menu.autoenablesItems = false
         statusItem.menu = menu
 
         state.onChange = { [weak self] in self?.updateButton() }
         updateButton()
 
-        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.state.refresh() }
+        // NSMenu tracking is modal and runs the loop in .eventTracking, where a
+        // timer scheduled the usual way never fires - which is why the readout
+        // used to freeze the moment the menu opened.
+        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            // synchronous: a Task hop would not drain while a menu is tracking
+            MainActor.assumeIsolated { self?.poll() }
         }
+        RunLoop.main.add(t, forMode: .common)
+        RunLoop.main.add(t, forMode: .eventTracking)
+        timer = t
     }
 
     /// Opens the menu and writes its screen rect (top-left origin, points) to
@@ -93,6 +123,43 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
     }
 
+    private func poll() {
+        tick += 1
+        if menuOpen {
+            // repaint the lines we already have; adding or removing items would
+            // disturb a tracking menu. Readings come from the background
+            // poller's cache, so this never waits on a socket.
+            repaintOpenMenu()
+        } else if tick % 2 == 0 {
+            state.refresh()
+        }
+    }
+
+    private func repaintOpenMenu() {
+        for (id, item) in readingItems {
+            guard let st = state.status[id] else { continue }
+            if let reading = state.reading(id) {
+                item.attributedTitle = Self.readingLine(reading)
+            } else if st.running {
+                item.attributedTitle = NSAttributedString(
+                    string: "      reading\u{2026}",
+                    attributes: [.font: NSFont.menuFont(ofSize: 11),
+                                 .foregroundColor: Self.detailColor])
+            }
+        }
+        updateButton()
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        menuOpen = true
+        repaintOpenMenu()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        menuOpen = false
+        readingItems.removeAll()
+    }
+
     private func updateButton() {
         guard let button = statusItem.button else { return }
         let name = state.anyRunning
@@ -122,6 +189,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         state.refresh()
         menu.removeAllItems()
+        readingItems.removeAll()
 
         if state.profiles.isEmpty {
             menu.addItem(info("No radios configured yet"))
@@ -149,6 +217,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         let configure = NSMenuItem(title: "Configure radios\u{2026}",
                                    action: #selector(openConfig), keyEquivalent: ",")
         configure.target = self
+        configure.isEnabled = true
         menu.addItem(configure)
 
         menu.addItem(.separator())
@@ -172,10 +241,12 @@ final class StatusController: NSObject, NSMenuDelegate {
         let about = NSMenuItem(title: "About AB6A RigCtl\u{2026}",
                                action: #selector(showAbout), keyEquivalent: "")
         about.target = self
+        about.isEnabled = true
         menu.addItem(about)
 
         let quit = NSMenuItem(title: "Quit AB6A RigCtl", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
+        quit.isEnabled = true
         menu.addItem(quit)
     }
 
@@ -197,18 +268,15 @@ final class StatusController: NSObject, NSMenuDelegate {
         mi.isEnabled = st.connected && !state.busy.contains(p.id)
         menu.addItem(mi)
 
-        if let reading = st.reading {
-            let line = NSMutableAttributedString(
-                string: "      \(reading.frequencyText) MHz",
-                attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
-                             .foregroundColor: Self.accent])
-            if !reading.mode.isEmpty {
-                line.append(NSAttributedString(
-                    string: "  \(reading.mode)",
-                    attributes: [.font: NSFont.menuFont(ofSize: 11),
-                                 .foregroundColor: NSColor.secondaryLabelColor]))
-            }
-            menu.addItem(info(attributed: line))
+        if let reading = state.reading(p.id) {
+            let item = info(attributed: Self.readingLine(reading))
+            readingItems[p.id] = item          // updated in place while open
+            menu.addItem(item)
+        } else if st.running {
+            // keep a slot so a reading can appear without rebuilding the menu
+            let item = info("      reading\u{2026}")
+            readingItems[p.id] = item
+            menu.addItem(item)
         } else if !st.connected {
             menu.addItem(info("      not connected"))
         } else if let err = st.lastError {
@@ -219,14 +287,29 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
     }
 
+    static func readingLine(_ reading: RigClient.Reading) -> NSAttributedString {
+        let line = NSMutableAttributedString(
+            string: "      \(reading.frequencyText) MHz",
+            attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .bold),
+                         .foregroundColor: frequencyColor])
+        if !reading.mode.isEmpty {
+            line.append(NSAttributedString(
+                string: "  \(reading.mode)",
+                attributes: [.font: NSFont.menuFont(ofSize: 11),
+                             .foregroundColor: modeColor]))
+        }
+        return line
+    }
+
     private func heading(_ text: String, detail: String) -> NSMenuItem {
         let s = NSMutableAttributedString(
             string: text,
-            attributes: [.font: NSFont.menuFont(ofSize: 13).bold])
+            attributes: [.font: NSFont.menuFont(ofSize: 13).bold,
+                         .foregroundColor: Self.nameColor])
         s.append(NSAttributedString(
             string: "   \(detail)",
             attributes: [.font: NSFont.menuFont(ofSize: 11),
-                         .foregroundColor: NSColor.secondaryLabelColor]))
+                         .foregroundColor: Self.detailColor]))
         return info(attributed: s)
     }
 
@@ -237,10 +320,12 @@ final class StatusController: NSObject, NSMenuDelegate {
                          .foregroundColor: NSColor.secondaryLabelColor]))
     }
 
+    /// An informational row: no action, but left "enabled" so AppKit renders it
+    /// at full contrast rather than dimming it.
     private func info(attributed: NSAttributedString) -> NSMenuItem {
         let mi = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         mi.attributedTitle = attributed
-        mi.isEnabled = false
+        mi.isEnabled = true
         return mi
     }
 
