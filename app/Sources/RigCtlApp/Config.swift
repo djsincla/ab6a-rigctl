@@ -30,6 +30,9 @@ struct Profile: Codable, Identifiable, Hashable {
 
     var id: String
     var name: String
+    /// "rig", "rotator" or "amplifier". Absent in profiles written before
+    /// rotators and amplifiers were supported, which were all radios.
+    var kind: String?
     var radio: RadioRef?
     var model: Int
     var baud: Int?
@@ -39,8 +42,12 @@ struct Profile: Codable, Identifiable, Hashable {
     var device: DeviceRef
 
     enum CodingKeys: String, CodingKey {
-        case id, name, radio, model, baud, port, civaddr, device
+        case id, name, kind, radio, model, baud, port, civaddr, device
         case extraArgs = "extra_args"
+    }
+
+    var deviceKind: DeviceKind {
+        DeviceKind(rawValue: kind ?? "") ?? .rig
     }
 
     var radioName: String { radio?.name ?? name }
@@ -75,11 +82,24 @@ struct ConfigFile: Codable {
 }
 
 enum Store {
-    static let configDir = URL(fileURLWithPath: NSHomeDirectory())
-        .appendingPathComponent(".config/ab6a-rigctl")
+    /// AB6A_CONFIG_DIR / AB6A_STATE_DIR override these, matching the CLI, which
+    /// keeps the two in step and makes testing possible without touching a real
+    /// configuration.
+    static let configDir: URL = {
+        if let override = ProcessInfo.processInfo.environment["AB6A_CONFIG_DIR"] {
+            return URL(fileURLWithPath: override)
+        }
+        return URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".config/ab6a-rigctl")
+    }()
     static let configURL = configDir.appendingPathComponent("profiles.json")
-    static let stateDir = URL(fileURLWithPath: NSHomeDirectory())
-        .appendingPathComponent(".local/state/ab6a-rigctl")
+    static let stateDir: URL = {
+        if let override = ProcessInfo.processInfo.environment["AB6A_STATE_DIR"] {
+            return URL(fileURLWithPath: override)
+        }
+        return URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".local/state/ab6a-rigctl")
+    }()
 
     static func load() -> [Profile] {
         guard let data = try? Data(contentsOf: configURL) else { return [] }

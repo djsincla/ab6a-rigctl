@@ -149,6 +149,31 @@
 
 <section>
   <div class="wrap">
+    <h2>Radios, rotators and amplifiers</h2>
+    <p style="color:var(--muted);font-size:15px;margin:0 0 18px">
+      Hamlib keeps the three apart: separate daemons, separate model tables, separate default
+      ports, separate protocols. Handing a rotator model number to <code>rigctld</code> just
+      gets you <code>Unknown rig num</code>. Each device carries a <em style="font-style:normal;
+      color:var(--ink)">type</em>, and everything else follows from it.
+    </p>
+    <table>
+      <tr><th>Type</th><th>Daemon</th><th>Default port</th><th>Models</th><th>The menu shows</th></tr>
+      <tr><td>Radio</td><td><code>rigctld</code></td><td><code>4532</code></td><td>312</td>
+          <td>frequency and mode</td></tr>
+      <tr><td>Rotator</td><td><code>rotctld</code></td><td><code>4533</code></td><td>57</td>
+          <td>azimuth and elevation</td></tr>
+      <tr><td>Amplifier</td><td><code>ampctld</code></td><td><code>4531</code></td><td>5</td>
+          <td>SWR</td></tr>
+    </table>
+    <p style="color:var(--muted);font-size:14px;margin-top:18px">
+      Ports are assigned from each type's Hamlib default and step over the others', so adding a
+      second radio never claims the port a rotator will want.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <h2>Ports are named as the radio reports them</h2>
     <p style="color:var(--muted);font-size:15px;margin:0 0 18px">
       An IC-7760 presents two serial ports over one USB cable, and they appear as

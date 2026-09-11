@@ -92,7 +92,8 @@ final class AppState {
         radios = found
         status = next
         poller.setTargets(loaded.compactMap { p in
-            next[p.id]?.running == true ? (id: p.id, port: p.port) : nil
+            next[p.id]?.running == true
+                ? (id: p.id, port: p.port, kind: p.deviceKind) : nil
         })
         onChange?()
     }

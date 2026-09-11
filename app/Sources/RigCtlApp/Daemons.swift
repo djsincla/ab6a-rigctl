@@ -1,6 +1,7 @@
 import Foundation
 
-/// Starts and stops rigctld, using the same pid/log files as the `ab6a-rigctl` CLI so
+/// Starts and stops the Hamlib daemon for a device - rigctld, rotctld or
+/// ampctld - using the same pid/log files as the `ab6a-rigctl` CLI so
 /// a daemon started by either is visible to both.
 enum Daemons {
     static func pidFile(_ p: Profile) -> URL {
@@ -11,20 +12,22 @@ enum Daemons {
     }
 
     static func command(_ p: Profile, device: String) -> [String] {
-        var cmd = ["rigctld", "-m", String(p.model), "-r", device, "-t", String(p.port)]
+        let kind = p.deviceKind
+        var cmd = [kind.daemon, "-m", String(p.model), "-r", device, "-t", String(p.port)]
         if let b = p.baud { cmd += ["-s", String(b)] }
-        if let c = p.civaddr, !c.isEmpty { cmd += ["-c", c] }
+        // -c is an Icom CI-V address; rotctld and ampctld have no such option
+        if kind == .rig, let c = p.civaddr, !c.isEmpty { cmd += ["-c", c] }
         cmd += p.extraArgs ?? []
         return cmd
     }
 
-    /// PID of this profile's rigctld, or nil. Confirms the process really is a
-    /// rigctld before believing the pid file, in case the pid was recycled.
+    /// PID of this profile's daemon, or nil. Confirms the process really is
+    /// that daemon before believing the pid file, in case the pid was recycled.
     static func runningPID(_ p: Profile) -> Int32? {
         guard let text = try? String(contentsOf: pidFile(p), encoding: .utf8),
               let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines))
         else { return nil }
-        guard processCommand(pid).contains("rigctld") else {
+        guard processCommand(pid).contains(p.deviceKind.daemon) else {
             try? FileManager.default.removeItem(at: pidFile(p))
             return nil
         }
@@ -74,8 +77,8 @@ enum Daemons {
             case .notConnected: return "That radio is not connected."
             case .interfaceTaken(let who): return "That interface is already open by \(who)."
             case .portBusy(let p): return "TCP port \(p) is already in use."
-            case .exited(let code, let log): return "rigctld exited (status \(code)). \(log)"
-            case .launchFailed(let m): return "Could not launch rigctld: \(m)"
+            case .exited(let code, let log): return "The daemon exited (status \(code)). \(log)"
+            case .launchFailed(let m): return "Could not launch the daemon: \(m)"
             }
         }
     }
@@ -113,7 +116,7 @@ enum Daemons {
         proc.standardOutput = handle
         proc.standardError = handle
         proc.standardInput = FileHandle.nullDevice
-        // Launched from Finder the PATH is minimal; rigctld lives in Homebrew's bin.
+        // Launched from Finder the PATH is minimal; the daemons live in Homebrew's bin.
         var env = ProcessInfo.processInfo.environment
         let path = env["PATH"] ?? ""
         for extra in ["/opt/homebrew/bin", "/usr/local/bin"] where !path.contains(extra) {
@@ -146,10 +149,10 @@ enum Daemons {
         kill(pid, SIGTERM)
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
-            if !processCommand(pid).contains("rigctld") { break }
+            if !processCommand(pid).contains(p.deviceKind.daemon) { break }
             usleep(100_000)
         }
-        if processCommand(pid).contains("rigctld") { kill(pid, SIGKILL) }
+        if processCommand(pid).contains(p.deviceKind.daemon) { kill(pid, SIGKILL) }
         try? FileManager.default.removeItem(at: pidFile(p))
     }
 }

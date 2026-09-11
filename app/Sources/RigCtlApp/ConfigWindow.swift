@@ -19,9 +19,12 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
 
     private struct RadioFields {
         let name: NSTextField
+        let kind: NSPopUpButton
         let model: NSComboBox
         let baud: NSPopUpButton
         let civ: NSTextField
+        let product: String?
+        let hint: NSTextField
     }
 
     private static let bauds = [0, 4800, 9600, 19200, 38400, 57600, 115200]
@@ -161,24 +164,23 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         header.orientation = .horizontal
         header.spacing = 8
 
-        // model - suggestions first, then the whole Hamlib table
+        // transceiver, rotator or amplifier - each has its own Hamlib daemon,
+        // model table and default port
+        let kindPicker = NSPopUpButton()
+        kindPicker.addItems(withTitles: DeviceKind.allCases.map { $0.displayName })
+        kindPicker.identifier = NSUserInterfaceItemIdentifier(radio.key)
+        kindPicker.target = self
+        kindPicker.action = #selector(kindChanged(_:))
+        let currentKind = existing?.deviceKind ?? .rig
+        kindPicker.selectItem(at: DeviceKind.allCases.firstIndex(of: currentKind) ?? 0)
+
         let combo = NSComboBox()
         combo.usesDataSource = false
         combo.completes = true
         combo.numberOfVisibleItems = 12
-        let suggested = ModelTable.suggestions(forProduct: first?.productName)
-        let suggestedIDs = Set(suggested.map { $0.id })
-        combo.addItems(withObjectValues:
-            suggested.map { $0.listing }
-            + ModelTable.all.filter { !suggestedIDs.contains($0.id) }.map { $0.listing })
-        combo.widthAnchor.constraint(equalToConstant: 290).isActive = true
-        combo.placeholderString = "type a model, e.g. IC-7300"
-
-        if let existing, let m = ModelTable.model(withID: existing.model) {
-            combo.stringValue = m.listing
-        } else if let guess = suggested.first {
-            combo.stringValue = guess.listing
-        }
+        combo.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        populate(combo, kind: currentKind, product: first?.productName,
+                 selecting: existing?.model)
 
         let baud = NSPopUpButton()
         baud.addItems(withTitles: Self.bauds.map { $0 == 0 ? "rig default" : String($0) })
@@ -192,26 +194,70 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         civ.font = .systemFont(ofSize: 12)
 
         let settings = NSStackView(views: [
+            label("Type", size: 11, secondary: true), kindPicker,
             label("Model", size: 11, secondary: true), combo,
-            label("Baud", size: 11, secondary: true), baud,
-            label("CI-V", size: 11, secondary: true), civ,
         ])
         settings.orientation = .horizontal
         settings.spacing = 8
 
-        if suggested.isEmpty {
-            let hint = label("This adapter does not identify the radio - choose the model yourself.",
-                             size: 10, secondary: true)
-            radioFields[radio.key] = RadioFields(name: name, model: combo, baud: baud, civ: civ)
-            var views: [NSView] = [header, settings, hint]
-            for iface in radio.interfaces { views.append(interfaceRow(radio: radio, iface: iface)) }
-            return column(views)
-        }
+        let serial = NSStackView(views: [
+            label("Baud", size: 11, secondary: true), baud,
+            label("CI-V", size: 11, secondary: true), civ,
+        ])
+        serial.orientation = .horizontal
+        serial.spacing = 8
 
-        radioFields[radio.key] = RadioFields(name: name, model: combo, baud: baud, civ: civ)
-        var views: [NSView] = [header, settings]
+        let hint = label(hintText(kind: currentKind, product: first?.productName),
+                         size: 10, secondary: true)
+        radioFields[radio.key] = RadioFields(name: name, kind: kindPicker, model: combo,
+                                             baud: baud, civ: civ,
+                                             product: first?.productName, hint: hint)
+        var views: [NSView] = [header, settings, serial, hint]
         for iface in radio.interfaces { views.append(interfaceRow(radio: radio, iface: iface)) }
         return column(views)
+    }
+
+    /// Fill the model box for a kind: suggestions first, then that kind's table.
+    private func populate(_ combo: NSComboBox, kind: DeviceKind,
+                          product: String?, selecting model: Int?) {
+        let suggested = ModelTable.suggestions(forProduct: product, kind: kind)
+        let suggestedIDs = Set(suggested.map { $0.id })
+        combo.removeAllItems()
+        combo.addItems(withObjectValues:
+            suggested.map { $0.listing }
+            + ModelTable.all(kind).filter { !suggestedIDs.contains($0.id) }.map { $0.listing })
+        switch kind {
+        case .rig: combo.placeholderString = "type a model, e.g. IC-7300"
+        case .rotator: combo.placeholderString = "type a model, e.g. GS-232"
+        case .amplifier: combo.placeholderString = "type a model, e.g. KPA1500"
+        }
+        if let model, let m = ModelTable.model(withID: model, kind: kind) {
+            combo.stringValue = m.listing
+        } else if let guess = suggested.first {
+            combo.stringValue = guess.listing
+        } else {
+            combo.stringValue = ""
+        }
+    }
+
+    private func hintText(kind: DeviceKind, product: String?) -> String {
+        if ModelTable.suggestions(forProduct: product, kind: kind).isEmpty {
+            return "This adapter does not identify the device - choose the model yourself."
+        }
+        return "Runs \(kind.daemon); default port \(kind.defaultPort)."
+    }
+
+    @objc private func kindChanged(_ sender: NSPopUpButton) {
+        guard let key = sender.identifier?.rawValue, let f = radioFields[key] else { return }
+        let kind = DeviceKind.allCases[sender.indexOfSelectedItem]
+        populate(f.model, kind: kind, product: f.product, selecting: nil)
+        f.hint.stringValue = hintText(kind: kind, product: f.product)
+        // serial settings only mean something for a transceiver
+        f.civ.isEnabled = kind == .rig
+        // re-seed ports from this kind's default
+        for row in rows where row.iface.radioKey == key {
+            row.port.stringValue = String(nextFreePort(for: kind, excluding: row.port))
+        }
     }
 
     private func column(_ views: [NSView]) -> NSStackView {
@@ -236,7 +282,9 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         name.widthAnchor.constraint(equalToConstant: 130).isActive = true
         name.font = .systemFont(ofSize: 12)
 
-        let port = NSTextField(string: String(existing?.port ?? nextFreePort()))
+        let kindForPort = existing?.deviceKind
+            ?? (radioFields[radio.key].map { DeviceKind.allCases[$0.kind.indexOfSelectedItem] } ?? .rig)
+        let port = NSTextField(string: String(existing?.port ?? nextFreePort(for: kindForPort)))
         port.widthAnchor.constraint(equalToConstant: 62).isActive = true
         port.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         let fmt = NumberFormatter()
@@ -263,11 +311,18 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         radio.interfaces.count == 1 ? "main" : (iface.interfaceNumber.map { "port \($0)" } ?? "main")
     }
 
-    private func nextFreePort() -> Int {
+    /// Next free port for a kind, starting at Hamlib's default for it and
+    /// stepping over the ports the other kinds expect, so adding a second radio
+    /// never claims the port a rotator will want.
+    private func nextFreePort(for kind: DeviceKind = .rig,
+                              excluding field: NSTextField? = nil) -> Int {
         var taken = Set(state.profiles.map { $0.port })
-        for r in rows { if let p = Int(r.port.stringValue) { taken.insert(p) } }
-        var port = 4532
-        while taken.contains(port) { port += 1 }
+        for r in rows where r.port !== field {
+            if let p = Int(r.port.stringValue) { taken.insert(p) }
+        }
+        let reserved = DeviceKind.reservedPorts.subtracting([kind.defaultPort])
+        var port = kind.defaultPort
+        while taken.contains(port) || reserved.contains(port) { port += 1 }
         return port
     }
 
@@ -310,11 +365,13 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
             let key = row.iface.radioKey
             guard let fields = radioFields[key] else { continue }
 
-            guard let modelID = ModelTable.id(fromListing: fields.model.stringValue) else {
+            let kind = DeviceKind.allCases[fields.kind.indexOfSelectedItem]
+            guard let modelID = ModelTable.id(fromListing: fields.model.stringValue,
+                                              kind: kind) else {
                 alert("Choose a radio type for \(fields.name.stringValue).",
                       detail: fields.model.stringValue.isEmpty
-                        ? "Nothing on a USB-serial adapter says which radio is behind it, so the model has to be set by hand. Type a model name such as IC-7300, or a Hamlib model number."
-                        : "\"\(fields.model.stringValue)\" is not a Hamlib model. Type a model name or number.")
+                        ? "Nothing on a USB-serial adapter says which device is behind it, so the model has to be set by hand. Type a model name, or a Hamlib model number from the \(kind.lister) table."
+                        : "\"\(fields.model.stringValue)\" is not in the Hamlib \(kind.displayName.lowercased()) table. Type a model name or number.")
                 return
             }
             guard let port = Int(row.port.stringValue), (1...65535).contains(port) else {
@@ -339,6 +396,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
             built.append(Profile(
                 id: row.existingID ?? slug("\(finalRadioName)-\(finalIfaceName)", existing: built),
                 name: finalIfaceName,
+                kind: kind.rawValue,
                 radio: .init(key: key, name: finalRadioName, serial: row.iface.serialNumber),
                 model: modelID,
                 baud: baud,

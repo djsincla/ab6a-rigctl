@@ -196,8 +196,10 @@ final class StatusController: NSObject, NSMenuDelegate {
             menu.addItem(info("Choose Configure radios below"))
         } else {
             for group in state.groupedProfiles {
-                menu.addItem(heading(group.radio,
-                                     detail: ModelTable.name(for: group.profiles[0].model)))
+                let first = group.profiles[0]
+                var detail = ModelTable.name(for: first.model, kind: first.deviceKind)
+                if first.deviceKind != .rig { detail += "  \u{00B7} \(first.deviceKind.displayName)" }
+                menu.addItem(heading(group.radio, detail: detail))
                 for p in group.profiles { addDaemon(p, to: menu) }
             }
         }
@@ -289,12 +291,12 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     static func readingLine(_ reading: RigClient.Reading) -> NSAttributedString {
         let line = NSMutableAttributedString(
-            string: "      \(reading.frequencyText) MHz",
+            string: "      \(reading.primary)",
             attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .bold),
                          .foregroundColor: frequencyColor])
-        if !reading.mode.isEmpty {
+        if !reading.secondary.isEmpty {
             line.append(NSAttributedString(
-                string: "  \(reading.mode)",
+                string: "  \(reading.secondary)",
                 attributes: [.font: NSFont.menuFont(ofSize: 11),
                              .foregroundColor: modeColor]))
         }

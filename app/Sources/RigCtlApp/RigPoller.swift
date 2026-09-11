@@ -13,6 +13,7 @@ final class RigPoller: @unchecked Sendable {
     private struct Target {
         let id: String
         let port: Int
+        let kind: DeviceKind
     }
 
     private let lock = NSLock()
@@ -35,9 +36,9 @@ final class RigPoller: @unchecked Sendable {
 
     /// Which daemons are running, and on which ports. Called whenever the
     /// configuration or the set of running daemons changes.
-    func setTargets(_ pairs: [(id: String, port: Int)]) {
+    func setTargets(_ pairs: [(id: String, port: Int, kind: DeviceKind)]) {
         lock.lock()
-        targets = pairs.map { Target(id: $0.id, port: $0.port) }
+        targets = pairs.map { Target(id: $0.id, port: $0.port, kind: $0.kind) }
         let live = Set(pairs.map { $0.id })
         for (id, client) in clients where !live.contains(id) {
             client.close()
@@ -56,20 +57,20 @@ final class RigPoller: @unchecked Sendable {
     private func sweep() {
         lock.lock()
         let current = targets
-        var use: [(String, RigClient)] = []
+        var use: [(String, RigClient, DeviceKind)] = []
         for t in current {
             if let c = clients[t.id] {
-                use.append((t.id, c))
+                use.append((t.id, c, t.kind))
             } else {
                 let c = RigClient(port: t.port)
                 clients[t.id] = c
-                use.append((t.id, c))
+                use.append((t.id, c, t.kind))
             }
         }
         lock.unlock()
 
-        for (id, client) in use {
-            let r = client.read()
+        for (id, client, kind) in use {
+            let r = client.read(kind: kind)
             lock.lock()
             cache[id] = r
             lock.unlock()

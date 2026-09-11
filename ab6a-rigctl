@@ -31,8 +31,30 @@ CONFIG_DIR = os.environ.get("AB6A_CONFIG_DIR") or os.path.expanduser("~/.config/
 CONFIG_FILE = os.path.join(CONFIG_DIR, "profiles.json")
 STATE_DIR = os.environ.get("AB6A_STATE_DIR") or os.path.expanduser("~/.local/state/ab6a-rigctl")
 
-DEFAULT_PORT = 4532
+# Hamlib keeps transceivers, rotators and amplifiers apart: separate daemons,
+# separate model tables, separate default ports, separate protocols. A rotator
+# model number handed to rigctld is simply rejected.
+KINDS = {
+    "rig":       {"daemon": "rigctld", "lister": "rigctl", "port": 4532,
+                  "label": "Radio",     "query": [("f", 1), ("m", 2)]},
+    "rotator":   {"daemon": "rotctld", "lister": "rotctl", "port": 4533,
+                  "label": "Rotator",   "query": [("p", 2)]},
+    "amplifier": {"daemon": "ampctld", "lister": "ampctl", "port": 4531,
+                  "label": "Amplifier", "query": [("l SWR", 1)]},
+}
+RESERVED_PORTS = {k["port"] for k in KINDS.values()}
+
+DEFAULT_PORT = KINDS["rig"]["port"]
 BAUD_CHOICES = [4800, 9600, 19200, 38400, 57600, 115200]
+
+
+def kind_of(profile):
+    """Profiles written before rotators were supported were all radios."""
+    return profile.get("kind") or "rig"
+
+
+def daemon_of(profile):
+    return KINDS[kind_of(profile)]["daemon"]
 
 # SysV shared-memory limits some ham software (notably WSJT-X on macOS) needs
 # raised above the stock values. macOS resets these on every boot unless they
@@ -298,20 +320,19 @@ def radios_in_config(cfg):
 # hamlib model list
 # --------------------------------------------------------------------------
 
-_MODELS = None
+_MODELS = {}
 
 
-def rig_models():
-    """Parse `rigctl -l` into [{id, mfg, model, status}]."""
-    global _MODELS
-    if _MODELS is not None:
-        return _MODELS
-    _MODELS = []
+def rig_models(kind="rig"):
+    """Parse `<lister> -l` into [{id, mfg, model, status}] for one kind."""
+    if kind in _MODELS:
+        return _MODELS[kind]
+    _MODELS[kind] = []
     try:
-        out = subprocess.run(["rigctl", "-l"], capture_output=True, text=True,
-                             timeout=20).stdout
+        out = subprocess.run([KINDS[kind]["lister"], "-l"], capture_output=True,
+                             text=True, timeout=20).stdout
     except Exception:
-        return _MODELS
+        return _MODELS[kind]
     for line in out.splitlines():
         m = re.match(r"\s*(\d+)\s\s+(.+)", line)
         if not m:
@@ -319,17 +340,17 @@ def rig_models():
         fields = re.split(r"\s{2,}", m.group(2).strip())
         if len(fields) < 2:
             continue
-        _MODELS.append({
+        _MODELS[kind].append({
             "id": int(m.group(1)),
             "mfg": fields[0].strip(),
             "model": fields[1].strip(),
             "status": fields[3].strip() if len(fields) > 3 else "",
         })
-    return _MODELS
+    return _MODELS[kind]
 
 
-def model_name(model_id):
-    for m in rig_models():
+def model_name(model_id, kind="rig"):
+    for m in rig_models(kind):
         if m["id"] == model_id:
             name = "%s %s" % (m["mfg"], m["model"])
             if m["status"] and m["status"].lower() not in ("stable",):
@@ -342,7 +363,7 @@ def _norm(s):
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
-def suggest_models(device):
+def suggest_models(device, kind="rig"):
     """Guess Hamlib models for a device from its USB product/vendor name."""
     product = _norm(device.get("product"))
     vendor = _norm(device.get("vendor"))
@@ -350,7 +371,7 @@ def suggest_models(device):
         return []
 
     exact, partial = [], []
-    for m in rig_models():
+    for m in rig_models(kind):
         mn = _norm(m["model"])
         if not mn or len(mn) < 3:
             continue
@@ -569,7 +590,7 @@ def running_pid(profile):
     except (OSError, ValueError):
         return None
     cmd = process_cmd(pid)
-    if "rigctld" not in cmd:
+    if daemon_of(profile) not in cmd:
         try:
             os.unlink(path)
         except OSError:
@@ -584,20 +605,24 @@ def port_in_use(port):
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
-def next_free_port(cfg, start=DEFAULT_PORT):
+def next_free_port(cfg, kind="rig"):
+    """Start at this kind's Hamlib default and step over the other kinds', so a
+    second radio never claims the port a rotator will want."""
     taken = {p.get("port") for p in cfg["profiles"]}
-    port = start
-    while port in taken or port_in_use(port):
+    reserved = RESERVED_PORTS - {KINDS[kind]["port"]}
+    port = KINDS[kind]["port"]
+    while port in taken or port in reserved or port_in_use(port):
         port += 1
     return port
 
 
 def build_command(profile, dev_path):
-    cmd = ["rigctld", "-m", str(profile["model"]), "-r", dev_path,
+    cmd = [daemon_of(profile), "-m", str(profile["model"]), "-r", dev_path,
            "-t", str(profile["port"])]
     if profile.get("baud"):
         cmd += ["-s", str(profile["baud"])]
-    if profile.get("civaddr"):
+    # -c is an Icom CI-V address; rotctld and ampctld have no such option
+    if kind_of(profile) == "rig" and profile.get("civaddr"):
         cmd += ["-c", str(profile["civaddr"])]
     cmd += list(profile.get("extra_args") or [])
     return cmd
@@ -683,7 +708,7 @@ def stop_profile(profile, quiet=False):
 
     deadline = time.time() + 5.0
     while time.time() < deadline:
-        if "rigctld" not in process_cmd(pid):
+        if daemon_of(profile) not in process_cmd(pid):
             break
         time.sleep(0.1)
     else:
@@ -735,7 +760,10 @@ def print_profiles(cfg, devices):
     n = 0
     for radio_name, profiles in radios_in_config(cfg):
         head = "  %s" % bold(radio_name)
-        detail = model_name(profiles[0]["model"])
+        kind = kind_of(profiles[0])
+        detail = model_name(profiles[0]["model"], kind)
+        if kind != "rig":
+            detail += "  \u00b7 %s" % KINDS[kind]["label"]
         if profiles[0].get("radio", {}).get("serial"):
             detail += "   serial %s" % profiles[0]["radio"]["serial"]
         print("%s   %s" % (head, dim(detail)))
@@ -852,9 +880,33 @@ def choose_device(devices, taken=None):
         print(red("  pick 1-%d" % len(devices)))
 
 
-def choose_model(device, current=None):
-    """Pick a Hamlib rig model, suggesting matches for the device."""
-    suggestions = suggest_models(device) if device else []
+def choose_kind(current="rig"):
+    """Transceiver, rotator or amplifier - each is a different Hamlib daemon."""
+    order = list(KINDS)
+    print(bold("\n  What kind of device is this?"))
+    for i, k in enumerate(order, 1):
+        info = KINDS[k]
+        mark = green(" (current)") if k == current else ""
+        print("   %s  %-11s %s%s" % (cyan("%2d" % i), info["label"],
+                                     dim("%s, default port %d" % (info["daemon"], info["port"])),
+                                     mark))
+    while True:
+        val = ask("\n  type", order.index(current) + 1)
+        try:
+            idx = int(val)
+            if 1 <= idx <= len(order):
+                return order[idx - 1]
+        except ValueError:
+            v = val.strip().lower()
+            for k in order:
+                if v == k or v == KINDS[k]["label"].lower():
+                    return k
+        print(red("  pick 1-%d" % len(order)))
+
+
+def choose_model(device, current=None, kind="rig"):
+    """Pick a Hamlib model, suggesting matches for the device."""
+    suggestions = suggest_models(device, kind) if device else []
     if suggestions:
         print()
         print(bold("  Suggested models for %s" % device_label(device)))
@@ -863,7 +915,8 @@ def choose_model(device, current=None):
             print("   %s  %-6d %s %s%s" % (cyan("%2d" % i), m["id"], m["mfg"], m["model"], status))
         print(dim("   or type a model number, or a name to search"))
     else:
-        print(dim("\n  type a Hamlib model number, or a name to search (e.g. 'ic-7300')"))
+        print(dim("\n  type a Hamlib %s model number, or a name to search"
+                  % KINDS[kind]["label"].lower()))
 
     while True:
         val = ask("\n  model", current)
@@ -878,13 +931,13 @@ def choose_model(device, current=None):
 
         if val.isdigit():
             mid = int(val)
-            if any(m["id"] == mid for m in rig_models()):
+            if any(m["id"] == mid for m in rig_models(kind)):
                 return mid
-            print(red("  no Hamlib model %d" % mid))
+            print(red("  no Hamlib %s model %d" % (KINDS[kind]["label"].lower(), mid)))
             continue
 
         needle = _norm(val)
-        hits = [m for m in rig_models()
+        hits = [m for m in rig_models(kind)
                 if needle in _norm(m["model"]) or needle in _norm(m["mfg"] + m["model"])]
         if not hits:
             print(red("  nothing matches %r" % val))
@@ -912,9 +965,9 @@ def ask_baud(current=None):
         return None
 
 
-def ask_port(cfg, current=None, profile_id=None):
+def ask_port(cfg, current=None, profile_id=None, kind="rig"):
     if current is None:
-        current = next_free_port(cfg)
+        current = next_free_port(cfg, kind)
     while True:
         port = ask_int("  TCP port", current)
         if not (1 <= port <= 65535):
@@ -1044,15 +1097,18 @@ def new_profile(cfg, devices):
     existing = [pr for pr in cfg["profiles"] if profile_radio_key(pr) == g["key"]]
     if existing:
         radio_name = profile_radio_name(existing[0])
+        kind = kind_of(existing[0])
         model = existing[0]["model"]
         baud = existing[0].get("baud")
         civ = existing[0].get("civaddr")
-        print(dim("\n  adding to %s (%s)" % (radio_name, model_name(model))))
+        print(dim("\n  adding to %s (%s)" % (radio_name, model_name(model, kind))))
     else:
-        radio_name = ask("\n  radio name", g["name"])
-        model = choose_model(g["interfaces"][0])
+        radio_name = ask("\n  device name", g["name"])
+        kind = choose_kind()
+        model = choose_model(g["interfaces"][0], kind=kind)
         baud = ask_baud()
-        civ = ask("  CI-V address (Icom only, blank for none)", "") or None
+        civ = (ask("  CI-V address (Icom only, blank for none)", "") or None
+               if kind == "rig" else None)
 
     picks = choose_interfaces(free)
     added = []
@@ -1063,13 +1119,14 @@ def new_profile(cfg, devices):
         if len(picks) == 1 and not existing:
             default_label = "main"
         label = ask("  what will use it?", default_label)
-        port = ask_port(cfg)
+        port = ask_port(cfg, kind=kind)
 
         fp = fingerprint(d)
         fp["dev"] = d["dev"]
         profile = {
             "id": unique_id(cfg, slugify("%s-%s" % (radio_name, label))),
             "name": label,
+            "kind": kind,
             "radio": {"key": g["key"], "name": radio_name, "serial": g.get("serial")},
             "model": model,
             "baud": baud,
@@ -1119,12 +1176,17 @@ def edit_profile(cfg, profile, devices):
                 profile["device"] = fp
                 dev = nd
 
-    print(dim("  model: %s" % model_name(profile["model"])))
+    print(dim("  type: %s" % KINDS[kind_of(profile)]["label"]))
+    if ask_yes("  change type?", False):
+        profile["kind"] = choose_kind(kind_of(profile))
+
+    kind = kind_of(profile)
+    print(dim("  model: %s" % model_name(profile["model"], kind)))
     if ask_yes("  change model?", False):
-        profile["model"] = choose_model(dev, profile["model"])
+        profile["model"] = choose_model(dev, profile["model"], kind)
 
     profile["baud"] = ask_baud(profile.get("baud"))
-    profile["port"] = ask_port(cfg, profile["port"], profile["id"])
+    profile["port"] = ask_port(cfg, profile["port"], profile["id"], kind)
     civ = ask("  CI-V address (blank for none)", profile.get("civaddr") or "")
     profile["civaddr"] = civ or None
     extra = ask("  extra rigctld arguments",
@@ -1284,54 +1346,75 @@ def need_one(cfg, arg, devices):
 
 
 def rig_query(port, commands, timeout=4.0):
-    """Speak the rigctld network protocol directly.
+    """Speak the Hamlib network protocol directly.
 
-    Cheaper than shelling out to rigctl, works whether or not rigctl is on
-    PATH, and - unlike rigctl - it cannot block forever on a wedged daemon.
+    `commands` is a list of (command, expected reply lines). Cheaper than
+    shelling out, works whether or not the CLI tools are on PATH, and - unlike
+    them - it cannot block forever on a wedged daemon.
     """
     replies = []
     with socket.create_connection(("127.0.0.1", port), timeout=timeout) as s:
         s.settimeout(timeout)
-        for cmd in commands:
+        for cmd, want in commands:
             s.sendall((cmd + "\n").encode())
-            buf = b""
-            while b"\n" not in buf:
+            lines, buf = [], b""
+            while len(lines) < want:
                 chunk = s.recv(256)
                 if not chunk:
                     break
                 buf += chunk
-            replies.append(buf.decode(errors="replace").strip())
+                while b"\n" in buf:
+                    raw, buf = buf.split(b"\n", 1)
+                    line = raw.decode(errors="replace").strip()
+                    if line:
+                        lines.append(line)
+                    if line.startswith("RPRT "):
+                        want = len(lines)      # error: nothing more is coming
+                        break
+            replies.append(lines)
     return replies
 
 
 def test_profile(profile):
-    """Ask the running daemon for frequency and mode."""
+    """Ask the running daemon what it sees."""
     pid = running_pid(profile)
     if not pid:
         print(red("  %s is not running" % full_name(profile)))
         return
+    kind = kind_of(profile)
     try:
-        freq, mode = rig_query(profile["port"], ["f", "m"])
+        replies = rig_query(profile["port"], KINDS[kind]["query"])
     except (OSError, socket.timeout) as exc:
         print(red("  could not reach the daemon on port %d: %s"
                   % (profile["port"], type(exc).__name__)))
         print(dim("  %s" % log_file(profile)))
         return
 
-    # hamlib reports failures as "RPRT <negative errno>"
-    for reply in (freq, mode):
-        if reply.startswith("RPRT ") and reply.split()[-1] not in ("0", ""):
-            print(red("  %s: rig returned %s" % (full_name(profile), reply)))
-            print(dim("  the radio may be off, or another program may hold the port"))
+    flat = [l for group in replies for l in group]
+    for line in flat:
+        if line.startswith("RPRT ") and line.split()[-1] not in ("0", ""):
+            print(red("  %s: returned %s" % (full_name(profile), line)))
+            print(dim("  the device may be off, or another program may hold the port"))
             return
 
-    try:
-        shown = "{:,}".format(int(freq.splitlines()[0])) + " Hz"
-    except (ValueError, IndexError):
-        shown = freq or "(no reply)"
-    mode_txt = " ".join(mode.split()) if mode else ""
-    print(green("  %s: " % full_name(profile)) + shown
-          + (dim("   mode %s" % mode_txt) if mode_txt else ""))
+    if kind == "rig":
+        freq = flat[0] if flat else ""
+        try:
+            shown = "{:,}".format(int(freq)).replace(",", ".") + " MHz"
+        except ValueError:
+            shown = freq or "(no reply)"
+        mode = replies[1][0] if len(replies) > 1 and replies[1] else ""
+        print(green("  %s: " % full_name(profile)) + shown
+              + (dim("   %s" % mode) if mode else ""))
+    elif kind == "rotator":
+        if len(flat) >= 2:
+            print(green("  %s: " % full_name(profile))
+                  + "az %.0f\u00b0   el %.0f\u00b0" % (float(flat[0]), float(flat[1])))
+        else:
+            print(yellow("  daemon answered but returned no position"))
+    else:
+        print(green("  %s: " % full_name(profile))
+              + ("SWR %s" % flat[0] if flat else "(no reply)"))
 
 
 def interactive():
@@ -1423,7 +1506,8 @@ USAGE = """usage: ab6a-rigctl [command]
   start [name|all] start daemons - a radio name starts every daemon on it
   stop  [name|all] stop daemons (default: all)
   restart [name]   stop then start
-  models [search]  list Hamlib rig models
+  models [rig|rotator|amplifier] [search]
+                   list Hamlib models for a device kind
   shm [--apply] [--persist]
                    show/raise the SysV shared memory limits some ham
                    software needs (--persist writes /etc/sysctl.conf)
@@ -1475,8 +1559,14 @@ def main(argv):
         return 0
 
     if cmd == "models":
-        needle = _norm(args[0]) if args else ""
-        for m in rig_models():
+        kind = "rig"
+        rest = list(args)
+        for k in KINDS:
+            if k in rest:
+                kind = k
+                rest.remove(k)
+        needle = _norm(rest[0]) if rest else ""
+        for m in rig_models(kind):
             if needle and needle not in _norm(m["mfg"] + m["model"]):
                 continue
             print("%-6d %-12s %-24s %s" % (m["id"], m["mfg"], m["model"], m["status"]))
@@ -1488,7 +1578,10 @@ def main(argv):
             print("no saved radios - run ab6a-rigctl with no arguments to add one")
             return 0
         for radio_name, profiles in radios_in_config(cfg):
-            print("%s  %s" % (bold(radio_name), dim(model_name(profiles[0]["model"]))))
+            k = kind_of(profiles[0])
+            tag = "" if k == "rig" else "  \u00b7 %s" % KINDS[k]["label"]
+            print("%s  %s" % (bold(radio_name),
+                              dim(model_name(profiles[0]["model"], k) + tag)))
             for p in profiles:
                 state, pid, dev = profile_status(p, devices)
                 print("  %-18s port %-6d %-26s %s%s" % (

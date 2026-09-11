@@ -12,10 +12,10 @@ import Foundation
 /// and libusb to satisfy hardened-runtime library validation. Not worth it for
 /// two commands.
 final class RigClient: @unchecked Sendable {
+    /// What a daemon reports, by kind. `primary` is the emphasised value.
     struct Reading {
-        var frequencyHz: Double
-        var mode: String
-        var passband: Int
+        var primary: String
+        var secondary: String
     }
 
     private let queue = DispatchQueue(label: "rigctl.client")
@@ -96,32 +96,41 @@ final class RigClient: @unchecked Sendable {
     /// One reading, or nil if the daemon is not answering yet. A daemon that has
     /// only just started can briefly fail, so this is worth retrying rather than
     /// treating as fatal.
-    func read() -> Reading? {
+    func read(kind: DeviceKind) -> Reading? {
         queue.sync {
-            guard let freqLines = ask("f", expecting: 1), let first = freqLines.first,
-                  !first.hasPrefix("RPRT "), let hz = Double(first)
-            else { return nil }
+            switch kind {
+            case .rig:
+                guard let freq = ask("f", expecting: 1)?.first,
+                      !freq.hasPrefix("RPRT "), let hz = Double(freq) else { return nil }
+                var mode = ""
+                if let lines = ask("m", expecting: 2), let m = lines.first,
+                   !m.hasPrefix("RPRT ") {
+                    mode = m
+                }
+                return Reading(primary: "\(Self.frequencyText(hz)) MHz", secondary: mode)
 
-            var mode = ""
-            var passband = 0
-            if let modeLines = ask("m", expecting: 2), let m = modeLines.first,
-               !m.hasPrefix("RPRT ") {
-                mode = m
-                if modeLines.count > 1 { passband = Int(modeLines[1]) ?? 0 }
+            case .rotator:
+                // get_pos answers with azimuth then elevation
+                guard let lines = ask("p", expecting: 2), lines.count >= 2,
+                      !lines[0].hasPrefix("RPRT "),
+                      let az = Double(lines[0]), let el = Double(lines[1]) else { return nil }
+                return Reading(primary: String(format: "az %.0f\u{00B0}   el %.0f\u{00B0}", az, el),
+                               secondary: "")
+
+            case .amplifier:
+                guard let line = ask("l SWR", expecting: 1)?.first,
+                      !line.hasPrefix("RPRT "), let swr = Double(line) else { return nil }
+                return Reading(primary: String(format: "SWR %.2f", swr), secondary: "")
             }
-            return Reading(frequencyHz: hz, mode: mode, passband: passband)
         }
     }
-}
 
-extension RigClient.Reading {
     /// 14321000 -> "14.321.000"
-    var frequencyText: String {
-        let hz = Int(frequencyHz)
-        guard hz > 0 else { return "-" }
-        let s = String(hz)
+    static func frequencyText(_ hz: Double) -> String {
+        let n = Int(hz)
+        guard n > 0 else { return "-" }
         var out: [String] = []
-        var rest = Substring(s)
+        var rest = Substring(String(n))
         while rest.count > 3 {
             out.insert(String(rest.suffix(3)), at: 0)
             rest = rest.dropLast(3)

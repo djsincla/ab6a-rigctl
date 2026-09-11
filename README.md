@@ -84,6 +84,22 @@ Each daemon has a toggle. **Configure radios…** is where you name a radio, pic
 its Hamlib model, baud rate and CI-V address, choose which of its interfaces
 carry a daemon, and set each daemon's TCP port.
 
+### Radios, rotators and amplifiers
+
+Hamlib keeps the three apart — separate daemons, separate model tables,
+separate default ports, separate protocols. Feeding a rotator model number to
+`rigctld` just gets you `Unknown rig num`. Each device carries a *type*, and
+everything else follows from it:
+
+| Type | Daemon | Default port | Models | Menu shows |
+|---|---|---|---|---|
+| Radio | `rigctld` | 4532 | 312 | frequency and mode |
+| Rotator | `rotctld` | 4533 | 57 | azimuth and elevation |
+| Amplifier | `ampctld` | 4531 | 5 | SWR |
+
+Ports are assigned from each type's Hamlib default and step over the others', so
+a second radio never claims the port a rotator will want.
+
 ### Radios, interfaces and daemons
 
 A radio is not the same thing as a serial interface. The IC-7760 presents two
@@ -134,7 +150,7 @@ ab6a-rigctl list | status      saved radios and whether they are running
 ab6a-rigctl start [name|all]   a radio name starts every daemon on it
 ab6a-rigctl stop  [name|all]   stop daemons
 ab6a-rigctl restart [name]
-ab6a-rigctl models [search]    search the Hamlib model list
+ab6a-rigctl models [rig|rotator|amplifier] [search]
 ```
 
 ## Why a daemon, and why no Hamlib library
