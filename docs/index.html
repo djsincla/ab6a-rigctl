@@ -211,8 +211,10 @@ interface 3   class 10   CDC-Data  <span class="a">&rarr;</span>  /dev/cu.usbmod
 
     <p style="color:var(--muted);font-size:15px;margin:18px 0 0">
       Point WSJT-X at <code style="color:var(--accent)">localhost:4532</code> and your logger at
-      <code style="color:var(--accent)">localhost:4533</code>, both as
-      <em style="font-style:normal;color:var(--ink)">Hamlib NET rigctl</em>. The radio is
+      <code style="color:var(--accent)">localhost:4534</code>, both as
+      <em style="font-style:normal;color:var(--ink)">Hamlib NET rigctl</em>. The second daemon is
+        offered 4534 rather than 4533, because 4533 is <code>rotctld</code>'s default and is
+        held for a rotator. The radio is
       identified from its own USB descriptor, so model 3092 is filled in for you — Hamlib
       never probes the rig.
     </p>

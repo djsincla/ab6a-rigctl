@@ -68,17 +68,7 @@ dependencies beyond Hamlib.
 
 Click the menu bar icon:
 
-```
-IC-7760            Icom IC-7760
-   ● main            port 4532
-        14.321.000 MHz  PKTUSB
-   ○ second          port 4533
-────────────────────────────────
-Configure…
-────────────────────────────────
-Start all connected
-Stop all
-```
+<img src="docs/config.png" width="620" alt="The Devices window: an IC-7760 with its type, model, baud and each interface assignable to a TCP port">
 
 Each daemon has a toggle. **Configure…** is where you name a device, pick its type,
 its Hamlib model, baud rate and CI-V address, choose which of its interfaces
