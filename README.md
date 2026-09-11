@@ -74,13 +74,13 @@ IC-7760            Icom IC-7760
         14.321.000 MHz  PKTUSB
    ○ second          port 4533
 ────────────────────────────────
-Configure radios…
+Configure…
 ────────────────────────────────
 Start all connected
 Stop all
 ```
 
-Each daemon has a toggle. **Configure radios…** is where you name a radio, pick
+Each daemon has a toggle. **Configure…** is where you name a device, pick its type,
 its Hamlib model, baud rate and CI-V address, choose which of its interfaces
 carry a daemon, and set each daemon's TCP port.
 

@@ -1,6 +1,6 @@
 import AppKit
 
-/// "Configure radios" - name a radio, choose its Hamlib model and baud rate,
+/// "Configure" - name a device, choose its type, Hamlib model and baud rate,
 /// then pick which of its interfaces carry a daemon and on which TCP port.
 ///
 /// One row per interface. An interface either has a daemon or it does not;
@@ -41,7 +41,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 460),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.title = "AB6A RigCtl - Radios"
+        window.title = "AB6A RigCtl - Devices"
         super.init(window: window)
         window.delegate = self
         rebuild()
@@ -71,7 +71,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
 
         let radios = state.selectableRadios
         if radios.isEmpty {
-            stack.addArrangedSubview(label("No radios found.", size: 13))
+            stack.addArrangedSubview(label("No devices found.", size: 13))
             stack.addArrangedSubview(
                 label("Only /dev/cu.usbmodem* devices are shown by default. A radio on a "
                       + "USB-serial adapter appears once you tick the box above.",

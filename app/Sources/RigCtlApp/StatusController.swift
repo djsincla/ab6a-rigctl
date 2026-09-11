@@ -193,7 +193,7 @@ final class StatusController: NSObject, NSMenuDelegate {
 
         if state.profiles.isEmpty {
             menu.addItem(info("No radios configured yet"))
-            menu.addItem(info("Choose Configure radios below"))
+            menu.addItem(info("Choose Configure below"))
         } else {
             for group in state.groupedProfiles {
                 let first = group.profiles[0]
@@ -216,7 +216,7 @@ final class StatusController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        let configure = NSMenuItem(title: "Configure radios\u{2026}",
+        let configure = NSMenuItem(title: "Configure\u{2026}",
                                    action: #selector(openConfig), keyEquivalent: ",")
         configure.target = self
         configure.isEnabled = true
