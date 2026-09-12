@@ -20,6 +20,9 @@ final class RigClient: @unchecked Sendable {
             var secondary: String
         }
         var lines: [Line]
+        /// True while the rig is keyed. The values are then the last ones read
+        /// at rest, held rather than refreshed.
+        var transmitting = false
 
         init(lines: [Line]) { self.lines = lines }
         init(primary: String, secondary: String) {
@@ -30,6 +33,8 @@ final class RigClient: @unchecked Sendable {
     private let queue = DispatchQueue(label: "rigctl.client")
     private let port: Int
     private var fd: Int32 = -1
+    /// The last reading taken while the rig was receiving.
+    private var lastAtRest: Reading?
 
     init(port: Int) { self.port = port }
 
@@ -115,20 +120,30 @@ final class RigClient: @unchecked Sendable {
         queue.sync {
             switch kind {
             case .rig:
+                // Hamlib's Main/Sub labels invert while the rig is keyed - the
+                // frequencies trade places and then trade back. It cannot read
+                // the VFO from the radio to correct itself, so the only honest
+                // thing is to hold the last reading taken at rest.
+                if transmitting(), var held = lastAtRest {
+                    held.transmitting = true
+                    return held
+                }
                 // Naming a VFO needs get_vfo_info: plain `f` reports whichever
                 // VFO the rig currently has selected, and `f Main` is ignored
                 // unless the daemon was started in VFO mode.
                 if let vfo, !vfo.isEmpty {
                     if vfo == Self.bothVFOs {
                         // one connection can report the whole radio
-                        let got = ["Main", "Sub"].compactMap { name -> Reading.Line? in
-                            guard let l = readVFO(name) else { return nil }
-                            return l
-                        }
-                        return got.isEmpty ? nil : Reading(lines: got)
+                        let got = ["Main", "Sub"].compactMap { readVFO($0) }
+                        guard !got.isEmpty else { return nil }
+                        let reading = Reading(lines: got)
+                        lastAtRest = reading
+                        return reading
                     }
                     guard let line = readVFO(vfo) else { return nil }
-                    return Reading(lines: [line])
+                    let reading = Reading(lines: [line])
+                    lastAtRest = reading
+                    return reading
                 }
                 guard let freq = ask("f", expecting: 1)?.first,
                       !freq.hasPrefix("RPRT "), let hz = Double(freq) else { return nil }
@@ -153,6 +168,12 @@ final class RigClient: @unchecked Sendable {
                 return Reading(primary: String(format: "SWR %.2f", swr), secondary: "")
             }
         }
+    }
+
+    /// Is the rig keyed? One extra command, around a millisecond.
+    private func transmitting() -> Bool {
+        guard let r = ask("t", expecting: 1)?.first else { return false }
+        return r == "1"
     }
 
     /// The VFO value meaning "show every receiver this radio has".

@@ -293,6 +293,12 @@ final class StatusController: NSObject, NSMenuDelegate {
     /// replace it without disturbing a tracking menu.
     static func readingLine(_ reading: RigClient.Reading) -> NSAttributedString {
         let out = NSMutableAttributedString()
+        if reading.transmitting {
+            out.append(NSAttributedString(
+                string: "      TX\n",
+                attributes: [.font: NSFont.menuFont(ofSize: 11).bold,
+                             .foregroundColor: NSColor.systemRed]))
+        }
         for (i, line) in reading.lines.enumerated() {
             if i > 0 { out.append(NSAttributedString(string: "\n")) }
             out.append(NSAttributedString(
