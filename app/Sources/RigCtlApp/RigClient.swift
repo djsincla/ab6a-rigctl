@@ -170,6 +170,18 @@ final class RigClient: @unchecked Sendable {
         }
     }
 
+    /// Hamlib's VFO names are not the names on the radio's front panel: its
+    /// "Main" tracks whichever VFO is selected, not the Main receiver. Showing
+    /// A and B says what can actually be substantiated - the rig's first and
+    /// second VFO - without claiming which physical receiver each one is.
+    static func displayName(_ vfo: String) -> String {
+        switch vfo {
+        case "Main", "VFOA": return "A"
+        case "Sub", "VFOB": return "B"
+        default: return vfo
+        }
+    }
+
     /// Is the rig keyed? One extra command, around a millisecond.
     private func transmitting() -> Bool {
         guard let r = ask("t", expecting: 1)?.first else { return false }
@@ -191,7 +203,7 @@ final class RigClient: @unchecked Sendable {
               let hz = Double(first) else { return nil }
         var mode = lines.count > 1 ? lines[1] : ""
         if mode == "None" || mode == "?" { mode = "" }
-        return Reading.Line(primary: "\(vfo)  \(Self.frequencyText(hz)) MHz",
+        return Reading.Line(primary: "\(Self.displayName(vfo))  \(Self.frequencyText(hz)) MHz",
                             secondary: mode)
     }
 

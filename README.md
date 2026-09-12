@@ -71,7 +71,7 @@ Click the menu bar icon:
 <img src="docs/config.png" width="620" alt="The Devices window: an IC-7760 with its type, model, baud and each interface assignable to a TCP port">
 
 Each daemon has a toggle, and a daemon can report a named receiver — set one to
-**Main and Sub** and a dual-receive radio shows both frequencies over a single
+**A and B** and a dual-receive radio shows both frequencies over a single
 connection.
 
 **Configure…** is where you name a device, pick its type,

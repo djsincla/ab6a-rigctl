@@ -19,11 +19,12 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
     }
 
     /// Titles offered for the VFO picker, and the value each stores.
+    /// Stored values stay as Hamlib's own names so existing configurations keep
+    /// working; only what is shown changes.
     private static let vfos: [(title: String, value: String?)] = [
         ("current VFO", nil),
-        ("Main and Sub", RigClient.bothVFOs),
-        ("Main", "Main"), ("Sub", "Sub"),
-        ("VFO A", "VFOA"), ("VFO B", "VFOB"),
+        ("A and B", RigClient.bothVFOs),
+        ("VFO A", "Main"), ("VFO B", "Sub"),
     ]
 
     private struct RadioFields {

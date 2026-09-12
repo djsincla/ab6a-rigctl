@@ -62,9 +62,19 @@ def daemon_of(profile):
 # frequency; get_vfo_info addresses one directly.
 BOTH_VFOS = "Both"
 
-VFO_CHOICES = [(None, "current VFO"), (BOTH_VFOS, "Main and Sub"),
-               ("Main", "Main"), ("Sub", "Sub"),
-               ("VFOA", "VFO A"), ("VFOB", "VFO B")]
+# Hamlib's VFO names are not the names on the radio's front panel: its "Main"
+# tracks whichever VFO is selected, not the Main receiver. A and B say what can
+# be substantiated - the rig's first and second VFO - without claiming which
+# physical receiver each one is. Stored values stay as Hamlib's own names so
+# existing configurations keep working.
+VFO_CHOICES = [(None, "current VFO"), (BOTH_VFOS, "A and B"),
+               ("Main", "VFO A"), ("Sub", "VFO B")]
+
+VFO_DISPLAY = {"Main": "A", "VFOA": "A", "Sub": "B", "VFOB": "B"}
+
+
+def vfo_label(vfo):
+    return VFO_DISPLAY.get(vfo, vfo)
 
 
 def vfo_of(profile):
@@ -1493,14 +1503,14 @@ def test_profile(profile):
                 if not group:
                     continue
                 mode = clean(group[1] if len(group) > 1 else "")
-                shown.append("%s %s%s" % (name, mhz(group[0]),
+                shown.append("%s %s%s" % (vfo_label(name), mhz(group[0]),
                                           "  " + mode if mode else ""))
             print(green("  %s: " % full_name(profile)) + dim("   ").join(shown))
         elif vfo:
             # get_vfo_info answers freq, mode, width, split, satmode
             mode = clean(flat[1] if len(flat) > 1 else "")
             print(green("  %s: " % full_name(profile)) + mhz(flat[0] if flat else "")
-                  + dim("   %s  %s" % (vfo, mode)))
+                  + dim("   %s  %s" % (vfo_label(vfo), mode)))
         else:
             mode = clean(replies[1][0] if len(replies) > 1 and replies[1] else "")
             print(green("  %s: " % full_name(profile)) + mhz(flat[0] if flat else "")
@@ -1684,7 +1694,7 @@ def main(argv):
             for p in profiles:
                 state, pid, dev = profile_status(p, devices)
                 print("  %-18s %-5s port %-6d %-26s %s%s" % (
-                    p["name"][:18], vfo_of(p) or "", p["port"],
+                    p["name"][:18], vfo_label(vfo_of(p)) if vfo_of(p) else "", p["port"],
                     dev["dev"] if dev else "not connected",
                     state, "  pid %d" % pid if pid else ""))
         return 0
