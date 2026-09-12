@@ -128,7 +128,7 @@ final class RigClient: @unchecked Sendable {
                       !freq.hasPrefix("RPRT "), let hz = Double(freq) else { return nil }
                 var mode = ""
                 if let lines = ask("m", expecting: 2), let m = lines.first,
-                   !m.hasPrefix("RPRT ") {
+                   !m.hasPrefix("RPRT "), m != "None", m != "?" {
                     mode = m
                 }
                 return Reading(primary: "\(Self.frequencyText(hz)) MHz", secondary: mode)
@@ -153,11 +153,17 @@ final class RigClient: @unchecked Sendable {
     static let bothVFOs = "Both"
 
     /// One receiver, via get_vfo_info: freq, mode, width, split, satmode.
+    ///
+    /// A daemon that has only just started has not populated its per-VFO cache,
+    /// and Hamlib answers with the literal string "None" and width 0. That is
+    /// "not known yet", not a mode, so it is shown as nothing rather than as a
+    /// mode called None; it fills in within a poll or two.
     private func readVFO(_ vfo: String) -> Reading.Line? {
         guard let lines = ask("\\get_vfo_info \(vfo)", expecting: 3),
               let first = lines.first, !first.hasPrefix("RPRT "),
               let hz = Double(first) else { return nil }
-        let mode = lines.count > 1 ? lines[1] : ""
+        var mode = lines.count > 1 ? lines[1] : ""
+        if mode == "None" || mode == "?" { mode = "" }
         return Reading.Line(primary: "\(vfo)  \(Self.frequencyText(hz)) MHz",
                             secondary: mode)
     }

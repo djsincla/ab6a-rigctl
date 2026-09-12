@@ -1475,23 +1475,29 @@ def test_profile(profile):
                 return hz or "(no reply)"
 
         vfo = vfo_of(profile)
+
+        def clean(m):
+            # a freshly started daemon answers "None" until its per-VFO cache
+            # fills; that is "not known yet", not a mode
+            return "" if m in ("None", "?") else m
+
         if vfo == BOTH_VFOS:
             names = ["Main", "Sub"]
             shown = []
             for name, group in zip(names, replies):
                 if not group:
                     continue
-                mode = group[1] if len(group) > 1 else ""
+                mode = clean(group[1] if len(group) > 1 else "")
                 shown.append("%s %s%s" % (name, mhz(group[0]),
                                           "  " + mode if mode else ""))
             print(green("  %s: " % full_name(profile)) + dim("   ").join(shown))
         elif vfo:
             # get_vfo_info answers freq, mode, width, split, satmode
-            mode = flat[1] if len(flat) > 1 else ""
+            mode = clean(flat[1] if len(flat) > 1 else "")
             print(green("  %s: " % full_name(profile)) + mhz(flat[0] if flat else "")
                   + dim("   %s  %s" % (vfo, mode)))
         else:
-            mode = replies[1][0] if len(replies) > 1 and replies[1] else ""
+            mode = clean(replies[1][0] if len(replies) > 1 and replies[1] else "")
             print(green("  %s: " % full_name(profile)) + mhz(flat[0] if flat else "")
                   + dim("   %s" % mode))
     elif kind == "rotator":
