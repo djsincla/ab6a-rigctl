@@ -96,10 +96,22 @@ final class RigClient: @unchecked Sendable {
     /// One reading, or nil if the daemon is not answering yet. A daemon that has
     /// only just started can briefly fail, so this is worth retrying rather than
     /// treating as fatal.
-    func read(kind: DeviceKind) -> Reading? {
+    func read(kind: DeviceKind, vfo: String? = nil) -> Reading? {
         queue.sync {
             switch kind {
             case .rig:
+                // Naming a VFO needs get_vfo_info: plain `f` reports whichever
+                // VFO the rig currently has selected, and `f Main` is ignored
+                // unless the daemon was started in VFO mode.
+                if let vfo, !vfo.isEmpty {
+                    guard let lines = ask("\\get_vfo_info \(vfo)", expecting: 3),
+                          let first = lines.first, !first.hasPrefix("RPRT "),
+                          let hz = Double(first) else { return nil }
+                    let mode = lines.count > 1 ? lines[1] : ""
+                    return Reading(primary: "\(Self.frequencyText(hz)) MHz",
+                                   secondary: [vfo, mode].filter { !$0.isEmpty }
+                                       .joined(separator: "  "))
+                }
                 guard let freq = ask("f", expecting: 1)?.first,
                       !freq.hasPrefix("RPRT "), let hz = Double(freq) else { return nil }
                 var mode = ""

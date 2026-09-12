@@ -33,6 +33,9 @@ struct Profile: Codable, Identifiable, Hashable {
     /// "rig", "rotator" or "amplifier". Absent in profiles written before
     /// rotators and amplifiers were supported, which were all radios.
     var kind: String?
+    /// Which receiver this daemon reports: "Main", "Sub", "VFOA", "VFOB", or
+    /// nil for whichever VFO the rig currently has selected.
+    var vfo: String?
     var radio: RadioRef?
     var model: Int
     var baud: Int?
@@ -42,7 +45,7 @@ struct Profile: Codable, Identifiable, Hashable {
     var device: DeviceRef
 
     enum CodingKeys: String, CodingKey {
-        case id, name, kind, radio, model, baud, port, civaddr, device
+        case id, name, kind, vfo, radio, model, baud, port, civaddr, device
         case extraArgs = "extra_args"
     }
 

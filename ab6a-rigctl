@@ -56,6 +56,47 @@ def kind_of(profile):
 def daemon_of(profile):
     return KINDS[kind_of(profile)]["daemon"]
 
+
+# Which receiver a daemon reports. Plain get_freq follows whichever VFO the rig
+# currently has selected, so two daemons on one radio otherwise show the same
+# frequency; get_vfo_info addresses one directly.
+VFO_CHOICES = [(None, "current VFO"), ("Main", "Main"), ("Sub", "Sub"),
+               ("VFOA", "VFO A"), ("VFOB", "VFO B")]
+
+
+def vfo_of(profile):
+    return profile.get("vfo") or None
+
+
+def query_for(profile):
+    """The commands to read this profile, honouring its VFO if it has one."""
+    kind = kind_of(profile)
+    vfo = vfo_of(profile)
+    if kind == "rig" and vfo:
+        return [("\\get_vfo_info %s" % vfo, 3)]
+    return KINDS[kind]["query"]
+
+
+def ask_vfo(current=None):
+    print(dim("\n  which receiver should this daemon report?"))
+    for i, (_, label) in enumerate(VFO_CHOICES, 1):
+        print("   %s  %s" % (cyan("%2d" % i), label))
+    print(dim("   a radio with two receivers wants one daemon per VFO; otherwise"))
+    print(dim("   both report whichever VFO the rig happens to have selected"))
+    default = 1
+    for i, (v, _) in enumerate(VFO_CHOICES, 1):
+        if v == current:
+            default = i
+    while True:
+        val = ask("\n  reads", default)
+        try:
+            idx = int(val)
+            if 1 <= idx <= len(VFO_CHOICES):
+                return VFO_CHOICES[idx - 1][0]
+        except ValueError:
+            pass
+        print(red("  pick 1-%d" % len(VFO_CHOICES)))
+
 # SysV shared-memory limits some ham software (notably WSJT-X on macOS) needs
 # raised above the stock values. macOS resets these on every boot unless they
 # are written to /etc/sysctl.conf. Order matters - applied as listed.
@@ -1133,6 +1174,7 @@ def new_profile(cfg, devices):
         if len(picks) == 1 and not existing:
             default_label = "main"
         label = ask("  what will use it?", default_label)
+        vfo = ask_vfo() if kind == "rig" else None
         port = ask_port(cfg, kind=kind)
 
         fp = fingerprint(d)
@@ -1141,6 +1183,7 @@ def new_profile(cfg, devices):
             "id": unique_id(cfg, slugify("%s-%s" % (radio_name, label))),
             "name": label,
             "kind": kind,
+            "vfo": vfo,
             "radio": {"key": g["key"], "name": radio_name, "serial": g.get("serial")},
             "model": model,
             "baud": baud,
@@ -1198,6 +1241,13 @@ def edit_profile(cfg, profile, devices):
     print(dim("  model: %s" % model_name(profile["model"], kind)))
     if ask_yes("  change model?", False):
         profile["model"] = choose_model(dev, profile["model"], kind)
+
+    if kind == "rig":
+        print(dim("  reads: %s" % (vfo_of(profile) or "current VFO")))
+        if ask_yes("  change which receiver it reports?", False):
+            profile["vfo"] = ask_vfo(vfo_of(profile))
+    else:
+        profile["vfo"] = None
 
     profile["baud"] = ask_baud(profile.get("baud"))
     profile["port"] = ask_port(cfg, profile["port"], profile["id"], kind)
@@ -1397,7 +1447,7 @@ def test_profile(profile):
         return
     kind = kind_of(profile)
     try:
-        replies = rig_query(profile["port"], KINDS[kind]["query"])
+        replies = rig_query(profile["port"], query_for(profile))
     except (OSError, socket.timeout) as exc:
         print(red("  could not reach the daemon on port %d: %s"
                   % (profile["port"], type(exc).__name__)))
@@ -1417,9 +1467,14 @@ def test_profile(profile):
             shown = "{:,}".format(int(freq)).replace(",", ".") + " MHz"
         except ValueError:
             shown = freq or "(no reply)"
-        mode = replies[1][0] if len(replies) > 1 and replies[1] else ""
-        print(green("  %s: " % full_name(profile)) + shown
-              + (dim("   %s" % mode) if mode else ""))
+        if vfo_of(profile):
+            # get_vfo_info answers freq, mode, width, split, satmode
+            mode = flat[1] if len(flat) > 1 else ""
+            tag = "%s  " % vfo_of(profile)
+        else:
+            mode = replies[1][0] if len(replies) > 1 and replies[1] else ""
+            tag = ""
+        print(green("  %s: " % full_name(profile)) + shown + dim("   %s%s" % (tag, mode)))
     elif kind == "rotator":
         if len(flat) >= 2:
             print(green("  %s: " % full_name(profile))
@@ -1598,8 +1653,8 @@ def main(argv):
                               dim(model_name(profiles[0]["model"], k) + tag)))
             for p in profiles:
                 state, pid, dev = profile_status(p, devices)
-                print("  %-18s port %-6d %-26s %s%s" % (
-                    p["name"][:18], p["port"],
+                print("  %-18s %-5s port %-6d %-26s %s%s" % (
+                    p["name"][:18], vfo_of(p) or "", p["port"],
                     dev["dev"] if dev else "not connected",
                     state, "  pid %d" % pid if pid else ""))
         return 0

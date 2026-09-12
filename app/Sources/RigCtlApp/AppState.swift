@@ -93,7 +93,7 @@ final class AppState {
         status = next
         poller.setTargets(loaded.compactMap { p in
             next[p.id]?.running == true
-                ? (id: p.id, port: p.port, kind: p.deviceKind) : nil
+                ? (id: p.id, port: p.port, kind: p.deviceKind, vfo: p.vfo) : nil
         })
         onChange?()
     }

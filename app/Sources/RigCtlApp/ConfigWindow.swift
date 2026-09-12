@@ -14,8 +14,15 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         let enable: NSButton
         let name: NSTextField
         let port: NSTextField
+        let vfo: NSPopUpButton
         let existingID: String?
     }
+
+    /// Titles offered for the VFO picker, and the value each stores.
+    private static let vfos: [(title: String, value: String?)] = [
+        ("current VFO", nil), ("Main", "Main"), ("Sub", "Sub"),
+        ("VFO A", "VFOA"), ("VFO B", "VFOB"),
+    ]
 
     private struct RadioFields {
         let name: NSTextField
@@ -289,6 +296,8 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         // re-seed ports from this kind's default
         for row in rows where row.iface.radioKey == key {
             row.port.stringValue = String(nextFreePort(for: kind, excluding: row.port))
+            row.vfo.isEnabled = kind == .rig
+            if kind != .rig { row.vfo.selectItem(at: 0) }
         }
     }
 
@@ -373,9 +382,21 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         fmt.maximum = 65535
         port.formatter = fmt
 
+        // Which receiver this daemon reports. Plain get_freq follows whatever
+        // VFO the rig currently has selected, so two daemons on one radio
+        // otherwise show the same frequency.
+        let vfo = NSPopUpButton()
+        vfo.addItems(withTitles: Self.vfos.map { $0.title })
+        if let want = existing?.vfo,
+           let idx = Self.vfos.firstIndex(where: { $0.value == want }) {
+            vfo.selectItem(at: idx)
+        }
+        vfo.isEnabled = (existing?.deviceKind ?? .rig) == .rig
+
         let line = NSStackView(views: [
             enable, path, NSView(),
             label("as", size: 11, secondary: true), name,
+            label("reads", size: 11, secondary: true), vfo,
             label("TCP", size: 11, secondary: true), port,
         ])
         line.orientation = .horizontal
@@ -383,7 +404,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         line.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 0)
 
         rows.append(IfaceRow(iface: iface, enable: enable, name: name, port: port,
-                             existingID: existing?.id))
+                             vfo: vfo, existingID: existing?.id))
         return line
     }
 
@@ -431,7 +452,9 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
             for row in rows where row.iface.radioKey == radio.key {
                 out.append("   [\(row.enable.state == .on ? "x" : " ")] \(row.enable.title)"
                            + "  \(row.iface.devicePath)"
-                           + "  as \(row.name.stringValue)  TCP \(row.port.stringValue)")
+                           + "  as \(row.name.stringValue)"
+                           + "  reads \(row.vfo.titleOfSelectedItem ?? "?")"
+                           + "  TCP \(row.port.stringValue)")
             }
         }
         return out
@@ -481,6 +504,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
                 id: row.existingID ?? slug("\(finalRadioName)-\(finalIfaceName)", existing: built),
                 name: finalIfaceName,
                 kind: kind.rawValue,
+                vfo: kind == .rig ? Self.vfos[row.vfo.indexOfSelectedItem].value : nil,
                 radio: .init(key: key, name: finalRadioName, serial: row.iface.serialNumber),
                 model: modelID,
                 baud: baud,
