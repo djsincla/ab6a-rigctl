@@ -239,24 +239,27 @@ interface 3   class 10   CDC-Data  <span class="a">&rarr;</span>  /dev/cu.usbmod
 
 <section>
   <div class="wrap">
-    <h2>A and B are not Main and Sub</h2>
+    <h2>A and B, and what they mean under split</h2>
     <p style="color:var(--muted);font-size:15px;margin:0 0 16px">
       A dual-receive radio reports two VFOs, shown as <strong style="color:var(--ink)">A</strong>
-      and <strong style="color:var(--ink)">B</strong>. Those are Hamlib's first and second VFO,
-      not the Main and Sub receivers printed on the front panel, and they do not reliably
-      correspond.
+      and <strong style="color:var(--ink)">B</strong>. These do correspond to the radio's own
+      VFO A and B — verified by moving one from the computer and watching which changed on the
+      front panel, and again by transmitting split and seeing B key up.
     </p>
     <p class="warn">
-      On an IC-7760, Hamlib's &ldquo;Main&rdquo; tracks whichever VFO is selected rather than the
-      Main receiver: a <code>set_vfo Sub</code> that the radio ignored outright still made Hamlib
-      report the two swapped. Asking for <code>VFOA</code>/<code>VFOB</code> changes nothing —
-      this backend aliases them to Main and Sub and they move together. Hamlib reports
-      <code>Can get VFO: N</code> for this rig, so it cannot read the VFO back to correct itself.
+      What is not dependable is Hamlib's internal naming. It calls them Main and Sub, but its
+      &ldquo;Main&rdquo; tracks whichever VFO is selected rather than the Main receiver: a
+      <code>set_vfo Sub</code> that the radio ignored outright still made Hamlib report the two
+      swapped. Asking for <code>VFOA</code>/<code>VFOB</code> changes nothing — this backend
+      aliases them to Main and Sub and they move together, and
+      <code>Can get VFO: N</code> means Hamlib cannot read the VFO back to correct itself.
     </p>
     <p style="color:var(--muted);font-size:15px;margin:16px 0 0">
-      So the labels are deliberately neutral. Under split transmit the two invert; the display
-      holds its last reading taken at rest and shows <strong style="color:var(--accent)">TX</strong>
-      while it does, so what you see stays correct through a key-down.
+      The practical consequence: under <strong style="color:var(--ink)">split transmit</strong>
+      Hamlib's reporting inverts, the frequencies trading places on key-down and back on release.
+      The display holds its last reading taken at rest and shows
+      <strong style="color:var(--accent)">TX</strong> while it does, so what you see stays correct
+      through a transmission.
     </p>
   </div>
 </section>

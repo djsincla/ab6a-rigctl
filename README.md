@@ -116,22 +116,24 @@ one for control, one for data — and only the data interface carries a `/dev`
 node. Nothing is missing: interface 2 is the control channel for the second
 port.
 
-### A and B are not your radio's Main and Sub
+### A and B, and what they mean under split
 
-A dual-receive radio reports two VFOs, shown as **A** and **B**. Those are
-Hamlib's first and second VFO, not the Main and Sub receivers printed on the
-front panel, and they do not reliably correspond.
+A dual-receive radio reports two VFOs, shown as **A** and **B**. These do
+correspond to the radio's own VFO A and B — verified by moving one from the
+computer and watching which one changed on the front panel, and again by
+transmitting split and seeing B key up.
 
-On an IC-7760, Hamlib's "Main" tracks whichever VFO is selected rather than the
-Main receiver: a `set_vfo Sub` that the radio ignored outright still made Hamlib
-report the two swapped. Asking for `VFOA`/`VFOB` instead changes nothing — this
-backend aliases them to Main and Sub, and they move together. Hamlib also
-reports `Can get VFO: N` for this rig, so it cannot read the VFO back to correct
-itself.
+What is *not* dependable is Hamlib's internal naming. It calls them Main and
+Sub, but its "Main" tracks whichever VFO is selected rather than the Main
+receiver: a `set_vfo Sub` that the radio ignored outright still made Hamlib
+report the two swapped. Asking for `VFOA`/`VFOB` changes nothing — this backend
+aliases them to Main and Sub and they move together. Hamlib also reports
+`Can get VFO: N` for this rig, so it cannot read the VFO back to correct itself.
 
-The labels are therefore deliberately neutral. Under split transmit the two
-invert; the display holds its last reading taken at rest and shows **TX** while
-it does, so what you see stays correct through a key-down.
+The practical consequence is that under **split transmit** Hamlib's reporting
+inverts: the frequencies trade places on key-down and trade back on release. The
+display holds its last reading taken at rest and shows **TX** while it does, so
+what you see stays correct through a transmission.
 
 ### Radios that cannot identify themselves
 
