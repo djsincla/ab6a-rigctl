@@ -116,6 +116,23 @@ one for control, one for data — and only the data interface carries a `/dev`
 node. Nothing is missing: interface 2 is the control channel for the second
 port.
 
+### A and B are not your radio's Main and Sub
+
+A dual-receive radio reports two VFOs, shown as **A** and **B**. Those are
+Hamlib's first and second VFO, not the Main and Sub receivers printed on the
+front panel, and they do not reliably correspond.
+
+On an IC-7760, Hamlib's "Main" tracks whichever VFO is selected rather than the
+Main receiver: a `set_vfo Sub` that the radio ignored outright still made Hamlib
+report the two swapped. Asking for `VFOA`/`VFOB` instead changes nothing — this
+backend aliases them to Main and Sub, and they move together. Hamlib also
+reports `Can get VFO: N` for this rig, so it cannot read the VFO back to correct
+itself.
+
+The labels are therefore deliberately neutral. Under split transmit the two
+invert; the display holds its last reading taken at rest and shows **TX** while
+it does, so what you see stays correct through a key-down.
+
 ### Radios that cannot identify themselves
 
 A radio plugged in over native USB reports who it is. An IC-7760 is recognised as

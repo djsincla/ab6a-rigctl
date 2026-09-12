@@ -239,6 +239,30 @@ interface 3   class 10   CDC-Data  <span class="a">&rarr;</span>  /dev/cu.usbmod
 
 <section>
   <div class="wrap">
+    <h2>A and B are not Main and Sub</h2>
+    <p style="color:var(--muted);font-size:15px;margin:0 0 16px">
+      A dual-receive radio reports two VFOs, shown as <strong style="color:var(--ink)">A</strong>
+      and <strong style="color:var(--ink)">B</strong>. Those are Hamlib's first and second VFO,
+      not the Main and Sub receivers printed on the front panel, and they do not reliably
+      correspond.
+    </p>
+    <p class="warn">
+      On an IC-7760, Hamlib's &ldquo;Main&rdquo; tracks whichever VFO is selected rather than the
+      Main receiver: a <code>set_vfo Sub</code> that the radio ignored outright still made Hamlib
+      report the two swapped. Asking for <code>VFOA</code>/<code>VFOB</code> changes nothing —
+      this backend aliases them to Main and Sub and they move together. Hamlib reports
+      <code>Can get VFO: N</code> for this rig, so it cannot read the VFO back to correct itself.
+    </p>
+    <p style="color:var(--muted);font-size:15px;margin:16px 0 0">
+      So the labels are deliberately neutral. Under split transmit the two invert; the display
+      holds its last reading taken at rest and shows <strong style="color:var(--accent)">TX</strong>
+      while it does, so what you see stays correct through a key-down.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <h2>An interface is never shared</h2>
     <p class="warn">
       Exactly one daemon owns each serial interface. Two daemons on one interface
