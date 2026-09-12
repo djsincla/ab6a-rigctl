@@ -12,10 +12,19 @@ import Foundation
 /// and libusb to satisfy hardened-runtime library validation. Not worth it for
 /// two commands.
 final class RigClient: @unchecked Sendable {
-    /// What a daemon reports, by kind. `primary` is the emphasised value.
+    /// What a daemon reports, by kind. One line per receiver: a dual-receive
+    /// radio can report Main and Sub over a single connection.
     struct Reading {
-        var primary: String
-        var secondary: String
+        struct Line {
+            var primary: String
+            var secondary: String
+        }
+        var lines: [Line]
+
+        init(lines: [Line]) { self.lines = lines }
+        init(primary: String, secondary: String) {
+            self.lines = [Line(primary: primary, secondary: secondary)]
+        }
     }
 
     private let queue = DispatchQueue(label: "rigctl.client")
@@ -104,13 +113,16 @@ final class RigClient: @unchecked Sendable {
                 // VFO the rig currently has selected, and `f Main` is ignored
                 // unless the daemon was started in VFO mode.
                 if let vfo, !vfo.isEmpty {
-                    guard let lines = ask("\\get_vfo_info \(vfo)", expecting: 3),
-                          let first = lines.first, !first.hasPrefix("RPRT "),
-                          let hz = Double(first) else { return nil }
-                    let mode = lines.count > 1 ? lines[1] : ""
-                    return Reading(primary: "\(Self.frequencyText(hz)) MHz",
-                                   secondary: [vfo, mode].filter { !$0.isEmpty }
-                                       .joined(separator: "  "))
+                    if vfo == Self.bothVFOs {
+                        // one connection can report the whole radio
+                        let got = ["Main", "Sub"].compactMap { name -> Reading.Line? in
+                            guard let l = readVFO(name) else { return nil }
+                            return l
+                        }
+                        return got.isEmpty ? nil : Reading(lines: got)
+                    }
+                    guard let line = readVFO(vfo) else { return nil }
+                    return Reading(lines: [line])
                 }
                 guard let freq = ask("f", expecting: 1)?.first,
                       !freq.hasPrefix("RPRT "), let hz = Double(freq) else { return nil }
@@ -135,6 +147,19 @@ final class RigClient: @unchecked Sendable {
                 return Reading(primary: String(format: "SWR %.2f", swr), secondary: "")
             }
         }
+    }
+
+    /// The VFO value meaning "show every receiver this radio has".
+    static let bothVFOs = "Both"
+
+    /// One receiver, via get_vfo_info: freq, mode, width, split, satmode.
+    private func readVFO(_ vfo: String) -> Reading.Line? {
+        guard let lines = ask("\\get_vfo_info \(vfo)", expecting: 3),
+              let first = lines.first, !first.hasPrefix("RPRT "),
+              let hz = Double(first) else { return nil }
+        let mode = lines.count > 1 ? lines[1] : ""
+        return Reading.Line(primary: "\(vfo)  \(Self.frequencyText(hz)) MHz",
+                            secondary: mode)
     }
 
     /// 14321000 -> "14.321.000"

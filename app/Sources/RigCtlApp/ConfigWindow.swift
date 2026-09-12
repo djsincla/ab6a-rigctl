@@ -20,7 +20,9 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
 
     /// Titles offered for the VFO picker, and the value each stores.
     private static let vfos: [(title: String, value: String?)] = [
-        ("current VFO", nil), ("Main", "Main"), ("Sub", "Sub"),
+        ("current VFO", nil),
+        ("Main and Sub", RigClient.bothVFOs),
+        ("Main", "Main"), ("Sub", "Sub"),
         ("VFO A", "VFOA"), ("VFO B", "VFOB"),
     ]
 

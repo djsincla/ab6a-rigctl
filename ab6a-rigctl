@@ -60,7 +60,10 @@ def daemon_of(profile):
 # Which receiver a daemon reports. Plain get_freq follows whichever VFO the rig
 # currently has selected, so two daemons on one radio otherwise show the same
 # frequency; get_vfo_info addresses one directly.
-VFO_CHOICES = [(None, "current VFO"), ("Main", "Main"), ("Sub", "Sub"),
+BOTH_VFOS = "Both"
+
+VFO_CHOICES = [(None, "current VFO"), (BOTH_VFOS, "Main and Sub"),
+               ("Main", "Main"), ("Sub", "Sub"),
                ("VFOA", "VFO A"), ("VFOB", "VFO B")]
 
 
@@ -72,6 +75,9 @@ def query_for(profile):
     """The commands to read this profile, honouring its VFO if it has one."""
     kind = kind_of(profile)
     vfo = vfo_of(profile)
+    if kind == "rig" and vfo == BOTH_VFOS:
+        # one connection can report the whole radio
+        return [("\\get_vfo_info Main", 3), ("\\get_vfo_info Sub", 3)]
     if kind == "rig" and vfo:
         return [("\\get_vfo_info %s" % vfo, 3)]
     return KINDS[kind]["query"]
@@ -1462,19 +1468,32 @@ def test_profile(profile):
             return
 
     if kind == "rig":
-        freq = flat[0] if flat else ""
-        try:
-            shown = "{:,}".format(int(freq)).replace(",", ".") + " MHz"
-        except ValueError:
-            shown = freq or "(no reply)"
-        if vfo_of(profile):
+        def mhz(hz):
+            try:
+                return "{:,}".format(int(hz)).replace(",", ".") + " MHz"
+            except ValueError:
+                return hz or "(no reply)"
+
+        vfo = vfo_of(profile)
+        if vfo == BOTH_VFOS:
+            names = ["Main", "Sub"]
+            shown = []
+            for name, group in zip(names, replies):
+                if not group:
+                    continue
+                mode = group[1] if len(group) > 1 else ""
+                shown.append("%s %s%s" % (name, mhz(group[0]),
+                                          "  " + mode if mode else ""))
+            print(green("  %s: " % full_name(profile)) + dim("   ").join(shown))
+        elif vfo:
             # get_vfo_info answers freq, mode, width, split, satmode
             mode = flat[1] if len(flat) > 1 else ""
-            tag = "%s  " % vfo_of(profile)
+            print(green("  %s: " % full_name(profile)) + mhz(flat[0] if flat else "")
+                  + dim("   %s  %s" % (vfo, mode)))
         else:
             mode = replies[1][0] if len(replies) > 1 and replies[1] else ""
-            tag = ""
-        print(green("  %s: " % full_name(profile)) + shown + dim("   %s%s" % (tag, mode)))
+            print(green("  %s: " % full_name(profile)) + mhz(flat[0] if flat else "")
+                  + dim("   %s" % mode))
     elif kind == "rotator":
         if len(flat) >= 2:
             print(green("  %s: " % full_name(profile))

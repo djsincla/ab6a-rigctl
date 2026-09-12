@@ -289,18 +289,24 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// One line per receiver, in a single menu item so the live repaint can
+    /// replace it without disturbing a tracking menu.
     static func readingLine(_ reading: RigClient.Reading) -> NSAttributedString {
-        let line = NSMutableAttributedString(
-            string: "      \(reading.primary)",
-            attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .bold),
-                         .foregroundColor: frequencyColor])
-        if !reading.secondary.isEmpty {
-            line.append(NSAttributedString(
-                string: "  \(reading.secondary)",
-                attributes: [.font: NSFont.menuFont(ofSize: 11),
-                             .foregroundColor: modeColor]))
+        let out = NSMutableAttributedString()
+        for (i, line) in reading.lines.enumerated() {
+            if i > 0 { out.append(NSAttributedString(string: "\n")) }
+            out.append(NSAttributedString(
+                string: "      \(line.primary)",
+                attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .bold),
+                             .foregroundColor: frequencyColor]))
+            if !line.secondary.isEmpty {
+                out.append(NSAttributedString(
+                    string: "  \(line.secondary)",
+                    attributes: [.font: NSFont.menuFont(ofSize: 11),
+                                 .foregroundColor: modeColor]))
+            }
         }
-        return line
+        return out
     }
 
     private func heading(_ text: String, detail: String) -> NSMenuItem {
