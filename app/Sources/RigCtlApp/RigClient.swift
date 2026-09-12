@@ -60,6 +60,12 @@ final class RigClient: @unchecked Sendable {
         }
         guard rc == 0 else { Darwin.close(sock); return false }
         fd = sock
+
+        // Prime Hamlib's per-VFO cache. Until something asks for the mode the
+        // plain way, get_vfo_info answers "None" for a VFO - and asking only
+        // ever through get_vfo_info never fills it, so the mode would stay
+        // blank for the life of the connection.
+        _ = ask("m", expecting: 2)
         return true
     }
 

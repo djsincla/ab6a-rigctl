@@ -1415,7 +1415,7 @@ def need_one(cfg, arg, devices):
     return resolve(cfg, ask("  which number?"))
 
 
-def rig_query(port, commands, timeout=4.0):
+def rig_query(port, commands, timeout=4.0, prime=False):
     """Speak the Hamlib network protocol directly.
 
     `commands` is a list of (command, expected reply lines). Cheaper than
@@ -1423,6 +1423,10 @@ def rig_query(port, commands, timeout=4.0):
     them - it cannot block forever on a wedged daemon.
     """
     replies = []
+    # Prime Hamlib's per-VFO cache: until the mode is asked for the plain way,
+    # get_vfo_info answers "None" for a VFO, and asking only through
+    # get_vfo_info never fills it.
+    commands = ([("m", 2)] + list(commands)) if prime else list(commands)
     with socket.create_connection(("127.0.0.1", port), timeout=timeout) as s:
         s.settimeout(timeout)
         for cmd, want in commands:
@@ -1442,7 +1446,7 @@ def rig_query(port, commands, timeout=4.0):
                         want = len(lines)      # error: nothing more is coming
                         break
             replies.append(lines)
-    return replies
+    return replies[1:] if prime else replies
 
 
 def test_profile(profile):
@@ -1453,7 +1457,8 @@ def test_profile(profile):
         return
     kind = kind_of(profile)
     try:
-        replies = rig_query(profile["port"], query_for(profile))
+        replies = rig_query(profile["port"], query_for(profile),
+                            prime=vfo_of(profile) is not None)
     except (OSError, socket.timeout) as exc:
         print(red("  could not reach the daemon on port %d: %s"
                   % (profile["port"], type(exc).__name__)))
