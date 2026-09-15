@@ -221,7 +221,7 @@ interface 3   class 10   CDC-Data  <span class="a">&rarr;</span>  /dev/cu.usbmod
       looks like this:
     </p>
 
-    <img src="config.png" alt="The Configure window with Show all serial devices ticked: a USB-serial adapter showing both its cu and tty device nodes, with type, model, baud, VFO, TCP port and extra daemon options"
+    <img src="config.png" alt="The Configure window: a USB-serial adapter showing both its cu and tty device nodes with a picker to choose between them, plus type, model, baud, VFO, TCP port and extra daemon options"
          style="width:100%;border-radius:10px;border:1px solid var(--line);
                 box-shadow:0 18px 44px rgba(0,0,0,.45)">
 
@@ -231,11 +231,13 @@ interface 3   class 10   CDC-Data  <span class="a">&rarr;</span>  /dev/cu.usbmod
       <code>--vfo</code> and so on, for rigs that need settings the defaults do not cover.
     </p>
     <p style="color:var(--muted);font-size:14px;margin:0 0 18px">
-      With <strong style="color:var(--ink)">Show all serial devices</strong> ticked, each interface
-      names both of the nodes macOS creates for a port &mdash; the call-out
-      <code>/dev/cu.*</code> that the daemon is given, and the dial-in
-      <code>/dev/tty.*</code> twin a port is often known by elsewhere. The adapter below cannot
-      say which radio is behind it, so its model and baud are set by hand.
+      macOS creates two nodes for every serial port, and each interface names both: the call-out
+      <code>/dev/cu.*</code> and the dial-in <code>/dev/tty.*</code> twin a port is often known by
+      elsewhere. The <strong style="color:var(--ink)">cu / tty</strong> picker chooses which one
+      the daemon is given &mdash; <code>cu</code> by default, since it opens immediately where
+      <code>tty</code> waits on carrier detect, but setups built around the <code>tty.*</code> name
+      work without a fight. The adapter below cannot say which radio is behind it, so its model
+      and baud are set by hand.
     </p>
     <p style="color:var(--muted);font-size:15px;margin:18px 0 0">
       Point WSJT-X at <code style="color:var(--accent)">localhost:4532</code> and your logger at
