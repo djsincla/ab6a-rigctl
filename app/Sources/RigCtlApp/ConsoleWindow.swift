@@ -142,6 +142,17 @@ final class ConsoleWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    /// Runs commands through the real send path, for a screenshot with real
+    /// output in it rather than an empty window.
+    func selfTestRun(_ commands: [String], gap: TimeInterval = 1.1) {
+        for (i, c) in commands.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + gap * Double(i + 1)) { [weak self] in
+                self?.input.stringValue = c
+                self?.sendCommand()
+            }
+        }
+    }
+
     // MARK: sending
 
     @objc private func preset(_ sender: NSButton) {

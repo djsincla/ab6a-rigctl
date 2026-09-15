@@ -110,7 +110,8 @@ final class StatusController: NSObject, NSMenuDelegate {
     /// Same idea for the console.
     func openConsoleForCapture(frameFile path: String, holdFor seconds: TimeInterval) {
         openConsole()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self] in
+        consoleWindow?.selfTestRun(["f", "m", "\\get_rig_info"])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.6) { [weak self] in
             guard let w = self?.consoleWindow?.window, let screen = NSScreen.screens.first
             else { return }
             let f = w.frame

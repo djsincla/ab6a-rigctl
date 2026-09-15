@@ -294,6 +294,29 @@ interface 3   class 10   CDC-Data  <span class="a">&rarr;</span>  /dev/cu.usbmod
 
 <section>
   <div class="wrap">
+    <h2>When something is not behaving</h2>
+    <p style="color:var(--muted);font-size:15px;margin:0 0 20px">
+      <strong style="color:var(--ink)">Console</strong> opens a window onto a running daemon: pick
+      the daemon, type a rigctl command, and see the raw reply with how long it took. The useful
+      question when a setup misbehaves is what the rig actually answers, not what a menu makes of
+      it. Ten presets cover the commands worth trying first, and <em style="font-style:normal;
+      color:var(--ink)">Copy all</em> takes the transcript for pasting into a message.
+    </p>
+
+    <img src="console.png" alt="The console window: commands f, m and get_rig_info sent to a daemon, each with its raw reply and timing"
+         style="width:100%;border-radius:10px;border:1px solid var(--line);
+                box-shadow:0 18px 44px rgba(0,0,0,.45)">
+
+    <p style="color:var(--muted);font-size:14px;margin:18px 0 0">
+      Each command uses its own connection, so a console session cannot disturb the menu's polling
+      or anything else already connected. Versions are named on open, and
+      <code>ab6a-rigctl version</code> prints the same alongside where the configuration lives.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <h2>Hamlib is required</h2>
     <p class="warn" style="margin-bottom:20px">
       AB6A RigCtl does not bundle Hamlib and will not work without it. Hamlib provides
