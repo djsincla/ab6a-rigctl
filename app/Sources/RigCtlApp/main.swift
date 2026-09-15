@@ -25,6 +25,17 @@ let delegate = MainActor.assumeIsolated { AppDelegate() }
 // A build-time smoke test for the menu construction path.
 if let mode = ProcessInfo.processInfo.environment["RIGCTL_SELFTEST"] {
     let lines = MainActor.assumeIsolated { () -> [String] in
+        if mode == "cmd" {
+            // what each profile would launch, without launching it
+            let state = AppState()
+            state.refresh()
+            let ifaces = Discovery.radios(includeAll: true).flatMap { $0.interfaces }
+            return state.profiles.map { p in
+                guard let i = p.match(in: ifaces) else { return "\(p.fullName): not connected" }
+                let path = (p.node == "tty" ? i.dialinPath : nil) ?? i.devicePath
+                return "\(p.fullName): " + Daemons.command(p, device: path).joined(separator: " ")
+            }
+        }
         if mode == "config" {
             let state = AppState()
             state.refresh()

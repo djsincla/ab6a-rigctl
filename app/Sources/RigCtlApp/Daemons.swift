@@ -87,6 +87,8 @@ enum Daemons {
     static func start(_ p: Profile, interfaces: [Interface], others: [Profile]) throws -> Int32 {
         if let pid = runningPID(p) { return pid }
         guard let iface = p.match(in: interfaces) else { throw StartError.notConnected }
+        // cu.* unless the profile asks for the dial-in node
+        let devicePath = (p.node == "tty" ? iface.dialinPath : nil) ?? iface.devicePath
 
         // An interface has exactly one owner. Never share one.
         if let clash = others.first(where: {
@@ -106,7 +108,7 @@ enum Daemons {
             throw StartError.launchFailed("cannot open \(log.path)")
         }
         handle.seekToEndOfFile()
-        let argv = command(p, device: iface.devicePath)
+        let argv = command(p, device: devicePath)
         let stamp = ISO8601DateFormatter().string(from: Date())
         handle.write("\n=== \(stamp): \(argv.joined(separator: " ")) ===\n".data(using: .utf8)!)
 

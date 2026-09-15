@@ -36,6 +36,9 @@ struct Profile: Codable, Identifiable, Hashable {
     /// Which receiver this daemon reports: "Main", "Sub", "VFOA", "VFOB", or
     /// nil for whichever VFO the rig currently has selected.
     var vfo: String?
+    /// Which of the two device nodes to open: "cu" (call-out, the default) or
+    /// "tty" (dial-in). macOS creates both for every serial port.
+    var node: String?
     var radio: RadioRef?
     var model: Int
     var baud: Int?
@@ -45,7 +48,7 @@ struct Profile: Codable, Identifiable, Hashable {
     var device: DeviceRef
 
     enum CodingKeys: String, CodingKey {
-        case id, name, kind, vfo, radio, model, baud, port, civaddr, device
+        case id, name, kind, vfo, node, radio, model, baud, port, civaddr, device
         case extraArgs = "extra_args"
     }
 

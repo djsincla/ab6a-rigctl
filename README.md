@@ -130,6 +130,11 @@ Since a port is often known by its `tty.*` name elsewhere, ticking **Show all
 serial devices** names both, so `/dev/tty.usbserial-05670043C229` is recognisable
 as `/dev/cu.usbserial-05670043C229` here.
 
+Each interface also has a **cu / tty** picker. `cu` is the default and the right
+choice for nearly everything, but setups built around the `tty.*` name — as most
+`rigctld` command lines are — can select it and the daemon is given that node
+instead.
+
 ### A and B, and what they mean under split
 
 A dual-receive radio reports two VFOs, shown as **A** and **B**. These do

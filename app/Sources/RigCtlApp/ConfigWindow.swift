@@ -15,6 +15,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         let name: NSTextField
         let port: NSTextField
         let vfo: NSPopUpButton
+        let node: NSPopUpButton
         let extra: NSTextField
         let existingID: String?
     }
@@ -405,8 +406,19 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         }
         vfo.isEnabled = (existing?.deviceKind ?? .rig) == .rig
 
+        // macOS creates two nodes for every serial port. cu.* is the sensible
+        // default - it opens immediately, where tty.* waits on carrier detect -
+        // but some setups are built around the tty.* name, so let it be chosen.
+        let node = NSPopUpButton()
+        node.addItems(withTitles: ["cu", "tty"])
+        if existing?.node == "tty" { node.selectItem(at: 1) }
+        node.isEnabled = iface.dialinPath != nil
+        node.toolTip = iface.dialinPath.map {
+            "call-out \(iface.devicePath)\ndial-in  \($0)"
+        } ?? "only a call-out node exists for this port"
+
         let line = NSStackView(views: [
-            enable, path, NSView(),
+            enable, path, node, NSView(),
             label("as", size: 11, secondary: true), name,
             label("reads", size: 11, secondary: true), vfo,
             label("TCP", size: 11, secondary: true), port,
@@ -434,7 +446,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         block.spacing = 4
 
         rows.append(IfaceRow(iface: iface, enable: enable, name: name, port: port,
-                             vfo: vfo, extra: extra, existingID: existing?.id))
+                             vfo: vfo, node: node, extra: extra, existingID: existing?.id))
         return block
     }
 
@@ -483,6 +495,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
                 out.append("   [\(row.enable.state == .on ? "x" : " ")] \(row.enable.title)"
                            + "  \(row.iface.devicePath)"
                            + "  as \(row.name.stringValue)"
+                           + "  node \(row.node.titleOfSelectedItem ?? "?")"
                            + "  reads \(row.vfo.titleOfSelectedItem ?? "?")"
                            + "  TCP \(row.port.stringValue)")
             }
@@ -535,6 +548,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
                 name: finalIfaceName,
                 kind: kind.rawValue,
                 vfo: kind == .rig ? Self.vfos[row.vfo.indexOfSelectedItem].value : nil,
+                node: row.node.indexOfSelectedItem == 1 ? "tty" : "cu",
                 radio: .init(key: key, name: finalRadioName, serial: row.iface.serialNumber),
                 model: modelID,
                 baud: baud,
@@ -547,7 +561,9 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
                               serial: row.iface.serialNumber,
                               interfaceNumber: row.iface.interfaceNumber,
                               product: row.iface.productName, vendor: row.iface.vendorName,
-                              dev: row.iface.devicePath)))
+                              dev: row.node.indexOfSelectedItem == 1
+                                  ? (row.iface.dialinPath ?? row.iface.devicePath)
+                                  : row.iface.devicePath)))
         }
 
         // radios that are not attached right now keep their profiles untouched

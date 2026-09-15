@@ -81,6 +81,18 @@ def vfo_of(profile):
     return profile.get("vfo") or None
 
 
+def node_of(profile):
+    """"cu" (call-out, the default) or "tty" (dial-in). macOS creates both."""
+    return "tty" if profile.get("node") == "tty" else "cu"
+
+
+def device_path(profile, dev):
+    """The node this profile asks for, falling back to the call-out one."""
+    if node_of(profile) == "tty" and dev.get("dialin"):
+        return dev["dialin"]
+    return dev["dev"]
+
+
 def query_for(profile):
     """The commands to read this profile, honouring its VFO if it has one."""
     kind = kind_of(profile)
@@ -229,6 +241,7 @@ def discover_devices():
             seen.add(dev)
             devices.append({
                 "dev": dev,
+                "dialin": node.get("IODialinDevice"),
                 "vendor": cur.get("USB Vendor Name"),
                 "product": cur.get("USB Product Name"),
                 "serial": cur.get("USB Serial Number"),
@@ -252,7 +265,8 @@ def discover_devices():
             if dev in seen or not is_candidate(dev):
                 continue
             devices.append({
-                "dev": dev, "vendor": None, "product": None, "serial": None,
+                "dev": dev, "dialin": "/dev/tty." + name[3:],
+                "vendor": None, "product": None, "serial": None,
                 "vid": None, "pid": None, "interface": None, "location": None,
             })
     except OSError:
@@ -723,7 +737,7 @@ def start_profile(profile, devices, cfg):
         return False
 
     os.makedirs(STATE_DIR, exist_ok=True)
-    cmd = build_command(profile, dev["dev"])
+    cmd = build_command(profile, device_path(profile, dev))
     log = log_file(profile)
 
     with open(log, "ab") as fh:
@@ -753,11 +767,11 @@ def start_profile(profile, devices, cfg):
         fh.write(str(proc.pid))
 
     # remember where it actually was this time
-    profile.setdefault("device", {})["dev"] = dev["dev"]
+    profile.setdefault("device", {})["dev"] = device_path(profile, dev)
     save_config(cfg)
 
     print(green("started ") + "%s  %s  port %s  pid %d"
-          % (bold(full_name(profile)), dev["dev"], profile["port"], proc.pid))
+          % (bold(full_name(profile)), device_path(profile, dev), profile["port"], proc.pid))
     return True
 
 
@@ -1191,6 +1205,12 @@ def new_profile(cfg, devices):
             default_label = "main"
         label = ask("  what will use it?", default_label)
         vfo = ask_vfo() if kind == "rig" else None
+        node = "cu"
+        if d.get("dialin"):
+            print(dim("\n  macOS creates two nodes for this port:"))
+            print("   %s  %s %s" % (cyan(" 1"), d["dev"], dim("(call-out, opens immediately)")))
+            print("   %s  %s %s" % (cyan(" 2"), d["dialin"], dim("(dial-in, waits on carrier)")))
+            node = "tty" if ask("\n  use", 1).strip() == "2" else "cu"
         port = ask_port(cfg, kind=kind)
 
         fp = fingerprint(d)
@@ -1200,6 +1220,7 @@ def new_profile(cfg, devices):
             "name": label,
             "kind": kind,
             "vfo": vfo,
+            "node": node,
             "radio": {"key": g["key"], "name": radio_name, "serial": g.get("serial")},
             "model": model,
             "baud": baud,
