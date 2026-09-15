@@ -15,6 +15,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         let name: NSTextField
         let port: NSTextField
         let vfo: NSPopUpButton
+        let extra: NSTextField
         let existingID: String?
     }
 
@@ -406,9 +407,27 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         line.spacing = 8
         line.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 0)
 
+        // anything else to hand the daemon, passed through verbatim:
+        // -C timeout=500, -P RIG, --vfo, and so on
+        let extra = NSTextField(string: (existing?.extraArgs ?? []).joined(separator: " "))
+        extra.placeholderString = "extra daemon options, e.g. -C timeout=500 -C retry=0"
+        extra.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        let extraLine = NSStackView(views: [
+            label("options", size: 11, secondary: true), extra,
+        ])
+        extraLine.orientation = .horizontal
+        extraLine.spacing = 8
+        extraLine.edgeInsets = NSEdgeInsets(top: 0, left: 32, bottom: 0, right: 0)
+        extra.widthAnchor.constraint(equalToConstant: 420).isActive = true
+
+        let block = NSStackView(views: [line, extraLine])
+        block.orientation = .vertical
+        block.alignment = .leading
+        block.spacing = 4
+
         rows.append(IfaceRow(iface: iface, enable: enable, name: name, port: port,
-                             vfo: vfo, existingID: existing?.id))
-        return line
+                             vfo: vfo, extra: extra, existingID: existing?.id))
+        return block
     }
 
     private func defaultName(for iface: Interface, on radio: Radio) -> String {
@@ -513,7 +532,9 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
                 baud: baud,
                 port: port,
                 civaddr: civ.isEmpty ? nil : civ,
-                extraArgs: state.profiles.first { $0.id == row.existingID }?.extraArgs ?? [],
+                extraArgs: row.extra.stringValue
+                    .split(whereSeparator: { $0 == " " || $0 == "\t" })
+                    .map(String.init),
                 device: .init(vid: row.iface.vendorID, pid: row.iface.productID,
                               serial: row.iface.serialNumber,
                               interfaceNumber: row.iface.interfaceNumber,

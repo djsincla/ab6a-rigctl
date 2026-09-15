@@ -74,6 +74,10 @@ Each daemon has a toggle, and a daemon can report a named receiver — set one t
 **A and B** and a dual-receive radio shows both frequencies over a single
 connection.
 
+Each daemon also takes an **options** field, passed to the Hamlib daemon
+verbatim — `-C timeout=500 -C retry=0`, `-P RIG`, `--vfo`, and so on. Useful for
+rigs that need timing or PTT settings the defaults do not cover.
+
 **Configure…** is where you name a device, pick its type,
 its Hamlib model, baud rate and CI-V address, choose which of its interfaces
 carry a daemon, and set each daemon's TCP port.
