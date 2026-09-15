@@ -221,10 +221,15 @@ interface 3   class 10   CDC-Data  <span class="a">&rarr;</span>  /dev/cu.usbmod
       looks like this:
     </p>
 
-    <img src="config.png" alt="The Configure window: an IC-7760 with model 3092, baud 115200, and its two interfaces each assignable to a TCP port"
+    <img src="config.png" alt="The Configure window: an IC-7760 with its type, model, baud, and each interface assignable to a VFO, a TCP port and extra daemon options"
          style="width:100%;border-radius:10px;border:1px solid var(--line);
                 box-shadow:0 18px 44px rgba(0,0,0,.45)">
 
+    <p style="color:var(--muted);font-size:15px;margin:18px 0 0">
+      Each daemon also takes an <strong style="color:var(--ink)">options</strong> field, handed to
+      the Hamlib daemon verbatim &mdash; <code>-C timeout=500 -C retry=0</code>, <code>-P RIG</code>,
+      <code>--vfo</code> and so on, for rigs that need settings the defaults do not cover.
+    </p>
     <p style="color:var(--muted);font-size:15px;margin:18px 0 0">
       Point WSJT-X at <code style="color:var(--accent)">localhost:4532</code> and your logger at
       <code style="color:var(--accent)">localhost:4534</code>, both as
