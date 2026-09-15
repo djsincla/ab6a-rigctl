@@ -44,6 +44,8 @@ KINDS = {
 }
 RESERVED_PORTS = {k["port"] for k in KINDS.values()}
 
+APP_VERSION = "2.3"
+
 DEFAULT_PORT = KINDS["rig"]["port"]
 BAUD_CHOICES = [4800, 9600, 19200, 38400, 57600, 115200]
 
@@ -1638,6 +1640,7 @@ USAGE = """usage: ab6a-rigctl [command]
   restart [name]   stop then start
   models [rig|rotator|amplifier] [search]
                    list Hamlib models for a device kind
+  version          this app's version, Hamlib's, and where things live
   shm [--apply] [--persist]
                    show/raise the SysV shared memory limits some ham
                    software needs (--persist writes /etc/sysctl.conf)
@@ -1659,6 +1662,20 @@ def main(argv):
 
     if cmd in ("-h", "--help", "help"):
         print(USAGE)
+        return 0
+
+    if cmd in ("version", "--version", "-V"):
+        # what to paste into a support message
+        print("AB6A RigCtl %s" % APP_VERSION)
+        for tool in ("rigctl", "rotctl", "ampctl"):
+            try:
+                out = subprocess.run([tool, "--version"], capture_output=True,
+                                     text=True, timeout=10).stdout.strip()
+                print("  %s" % (out.splitlines()[0] if out else "%s: no output" % tool))
+            except Exception:
+                print("  %s: not found on PATH" % tool)
+        print("  config  %s" % CONFIG_FILE)
+        print("  state   %s" % STATE_DIR)
         return 0
 
     if cmd == "devices":

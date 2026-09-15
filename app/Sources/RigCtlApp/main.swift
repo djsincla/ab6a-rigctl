@@ -36,6 +36,15 @@ if let mode = ProcessInfo.processInfo.environment["RIGCTL_SELFTEST"] {
                 return "\(p.fullName): " + Daemons.command(p, device: path).joined(separator: " ")
             }
         }
+        if mode == "console" {
+            let c = StatusController()
+            c.install()
+            c.openConsoleForCapture(frameFile:
+                ProcessInfo.processInfo.environment["RIGCTL_CONSOLE_FRAME"] ?? "/tmp/cf",
+                holdFor: 12)
+            NSApp.run()
+            return []
+        }
         if mode == "config" {
             let state = AppState()
             state.refresh()

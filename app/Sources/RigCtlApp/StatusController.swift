@@ -107,6 +107,22 @@ final class StatusController: NSObject, NSMenuDelegate {
         statusItem.button?.performClick(nil)
     }
 
+    /// Same idea for the console.
+    func openConsoleForCapture(frameFile path: String, holdFor seconds: TimeInterval) {
+        openConsole()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self] in
+            guard let w = self?.consoleWindow?.window, let screen = NSScreen.screens.first
+            else { return }
+            let f = w.frame
+            // the window number lets a screenshot capture this window alone,
+            // even when something else is in front of it
+            let rect = "\(Int(f.origin.x)),\(Int(screen.frame.height - f.maxY))," +
+                       "\(Int(f.width)),\(Int(f.height)) \(w.windowNumber)"
+            try? rect.write(toFile: path, atomically: true, encoding: .utf8)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { NSApp.terminate(nil) }
+    }
+
     /// Same idea for the configuration window.
     func openConfigForCapture(frameFile path: String, holdFor seconds: TimeInterval) {
         openConfig()
@@ -240,6 +256,12 @@ final class StatusController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        let console = NSMenuItem(title: "Console\u{2026}",
+                                 action: #selector(openConsole), keyEquivalent: "k")
+        console.target = self
+        console.isEnabled = !state.profiles.isEmpty
+        menu.addItem(console)
+
         let about = NSMenuItem(title: "About AB6A RigCtl\u{2026}",
                                action: #selector(showAbout), keyEquivalent: "")
         about.target = self
@@ -363,6 +385,16 @@ final class StatusController: NSObject, NSMenuDelegate {
                   + "something to connect to.\n\n",
             attributes: [.font: body]))
 
+        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
+            as? String ?? "?"
+        credits.append(NSAttributedString(
+            string: "Versions  ", attributes: [.font: NSFont.boldSystemFont(ofSize: 11)]))
+        credits.append(NSAttributedString(
+            string: "AB6A RigCtl \(appVersion)   \u{00B7}   "
+                  + (Hamlib.version.map { "Hamlib \($0)" } ?? "Hamlib not found")
+                  + "\n\n",
+            attributes: [.font: body]))
+
         credits.append(NSAttributedString(
             string: "Help  ", attributes: [.font: NSFont.boldSystemFont(ofSize: 11)]))
         credits.append(NSAttributedString(
@@ -391,6 +423,18 @@ final class StatusController: NSObject, NSMenuDelegate {
             .credits: credits,
             NSApplication.AboutPanelOptionKey(rawValue: "ApplicationName"): "AB6A RigCtl",
         ])
+    }
+
+    private var consoleWindow: ConsoleWindowController?
+
+    @objc private func openConsole() {
+        if consoleWindow == nil {
+            consoleWindow = ConsoleWindowController(state: state)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        consoleWindow?.showWindow(nil)
+        consoleWindow?.window?.center()
+        consoleWindow?.window?.makeKeyAndOrderFront(nil)
     }
 
     @objc private func openConfig() {

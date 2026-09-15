@@ -32,6 +32,24 @@ an IC-7760 is *Alpha* in 4.7.2, which the model picker shows you.
 
 Questions or problems: **AB6A.US@gmail.com**
 
+When reporting one, `ab6a-rigctl version` prints everything worth knowing:
+
+```
+AB6A RigCtl 2.3
+  rigctl Hamlib 4.7.2 2026-06-21T13:07:37Z SHA=40f63488f 64-bit
+  rotctl(d), Hamlib 4.7.2 …
+  ampctl(d), Hamlib 4.7.2 …
+  config  ~/.config/ab6a-rigctl/profiles.json
+  state   ~/.local/state/ab6a-rigctl
+```
+
+The same versions appear in **About AB6A RigCtl…**.
+
+**Console…** in the menu opens a window onto a running daemon: type a rigctl
+command, see the raw reply with its timing. Useful for working out what a rig
+actually answers rather than what the menu makes of it, and the output can be
+copied straight into a message.
+
 ## Why
 
 `rigctld` has to be started by hand with the right model number, the right
