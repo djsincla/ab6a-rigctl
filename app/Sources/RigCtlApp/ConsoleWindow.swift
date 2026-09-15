@@ -17,16 +17,19 @@ final class ConsoleWindowController: NSWindowController, NSWindowDelegate {
     private static let presets: [(String, String)] = [
         ("f", "frequency"),
         ("m", "mode"),
-        ("t", "PTT"),
-        ("s", "split"),
-        ("\\get_rig_info", "everything at once"),
-        ("\\chk_vfo", "is VFO mode on?"),
-        ("\\dump_caps", "what the backend supports"),
+        ("t", "PTT - 1 while transmitting"),
+        ("s", "split, and which VFO transmits"),
+        ("l STRENGTH", "S-meter, in dB relative to S9 - proves the receive path works"),
+        ("\\get_rig_info", "every VFO, split and mode in one reply"),
+        ("\\get_vfo_list", "which VFOs this backend believes the rig has"),
+        ("\\chk_vfo", "is the daemon in VFO mode? clients behave differently if so"),
+        ("\\dump_state", "what a client negotiates on connect"),
+        ("\\dump_caps", "everything the backend claims the rig can do"),
     ]
 
     init(state: AppState) {
         self.state = state
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 460),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 480),
                               styleMask: [.titled, .closable, .resizable],
                               backing: .buffered, defer: false)
         window.title = "AB6A RigCtl - Console"
@@ -61,18 +64,24 @@ final class ConsoleWindowController: NSWindowController, NSWindowDelegate {
         top.spacing = 8
         input.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        var presetViews: [NSView] = [label("try")]
-        for (cmd, why) in Self.presets {
+        func presetButton(_ cmd: String, _ why: String) -> NSButton {
             let b = NSButton(title: cmd, target: self, action: #selector(preset(_:)))
             b.bezelStyle = .rounded
             b.controlSize = .small
             b.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-            b.toolTip = why
-            presetViews.append(b)
+            b.toolTip = why          // hover says what each one is for
+            return b
         }
-        let presetRow = NSStackView(views: presetViews)
-        presetRow.orientation = .horizontal
-        presetRow.spacing = 5
+        let half = (Self.presets.count + 1) / 2
+        let rowOne = NSStackView(views: [label("try")]
+            + Self.presets.prefix(half).map { presetButton($0.0, $0.1) })
+        let rowTwo = NSStackView(views: [label("   ")]
+            + Self.presets.dropFirst(half).map { presetButton($0.0, $0.1) })
+        for r in [rowOne, rowTwo] { r.orientation = .horizontal; r.spacing = 5 }
+        let presetRow = NSStackView(views: [rowOne, rowTwo])
+        presetRow.orientation = .vertical
+        presetRow.alignment = .leading
+        presetRow.spacing = 4
 
         output = NSTextView()
         output.isEditable = false
