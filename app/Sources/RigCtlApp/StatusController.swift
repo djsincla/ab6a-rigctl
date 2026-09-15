@@ -375,36 +375,36 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     private static let helpEmail = "AB6A.US@gmail.com"
 
+
     @objc private func showAbout() {
-        let body = NSFont.systemFont(ofSize: 11)
+        // the standard panel, with slightly larger text than its default
+        let body = NSFont.systemFont(ofSize: 12)
+        let heading = NSFont.boldSystemFont(ofSize: 12)
         let credits = NSMutableAttributedString()
 
         credits.append(NSAttributedString(
-            string: "Runs a Hamlib rigctld daemon for each of your radio's "
-                  + "interfaces, so WSJT-X, fldigi and logging software have "
-                  + "something to connect to.\n\n",
+            string: "Runs a Hamlib daemon for each of your radio's interfaces, so "
+                  + "WSJT-X, fldigi and logging software have something to connect "
+                  + "to.\n\n",
             attributes: [.font: body]))
 
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
             as? String ?? "?"
-        credits.append(NSAttributedString(
-            string: "Versions  ", attributes: [.font: NSFont.boldSystemFont(ofSize: 11)]))
+        credits.append(NSAttributedString(string: "Versions  ", attributes: [.font: heading]))
         credits.append(NSAttributedString(
             string: "AB6A RigCtl \(appVersion)   \u{00B7}   "
                   + (Hamlib.version.map { "Hamlib \($0)" } ?? "Hamlib not found")
-                  + "\n\n",
+                  + "\n",
             attributes: [.font: body]))
 
-        credits.append(NSAttributedString(
-            string: "Help  ", attributes: [.font: NSFont.boldSystemFont(ofSize: 11)]))
+        credits.append(NSAttributedString(string: "Help  ", attributes: [.font: heading]))
         credits.append(NSAttributedString(
             string: Self.helpEmail + "\n",
             attributes: [.font: body,
                          .link: URL(string: "mailto:\(Self.helpEmail)")!,
                          .foregroundColor: Self.accent]))
 
-        credits.append(NSAttributedString(
-            string: "Source  ", attributes: [.font: NSFont.boldSystemFont(ofSize: 11)]))
+        credits.append(NSAttributedString(string: "Source  ", attributes: [.font: heading]))
         credits.append(NSAttributedString(
             string: "github.com/djsincla/ab6a-rigctl\n\n",
             attributes: [.font: body,
@@ -415,7 +415,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             string: "GPL-2.0-or-later, the licence Hamlib applies to its own "
                   + "programs. Hamlib is installed separately and licensed "
                   + "separately.",
-            attributes: [.font: NSFont.systemFont(ofSize: 10),
+            attributes: [.font: NSFont.systemFont(ofSize: 11),
                          .foregroundColor: NSColor.secondaryLabelColor]))
 
         NSApp.activate(ignoringOtherApps: true)
