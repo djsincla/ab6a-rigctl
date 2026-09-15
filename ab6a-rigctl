@@ -12,6 +12,13 @@ plugged into a different port is still recognised.
 
 import json
 import os
+# input() only gets line editing - backspace, arrow keys, history - when the
+# readline module is loaded. Without it, editing a default value types raw
+# control characters into the field.
+try:
+    import readline  # noqa: F401
+except ImportError:
+    pass
 import plistlib
 import re
 import shutil
@@ -1759,13 +1766,35 @@ def main(argv):
     if cmd in ("version", "--version", "-V"):
         # what to paste into a support message
         print("AB6A RigCtl %s" % APP_VERSION)
-        for tool in ("rigctl", "rotctl", "ampctl"):
+        # Which binary actually runs matters more than which version exists:
+        # a second, broken Hamlib earlier on PATH fails in ways that look like
+        # a configuration problem.
+        for tool in ("rigctl", "rigctld", "rotctl", "ampctl"):
+            found = shutil.which(tool)
+            if not found:
+                print("  %-8s not found on PATH" % tool)
+                continue
             try:
-                out = subprocess.run([tool, "--version"], capture_output=True,
-                                     text=True, timeout=10).stdout.strip()
-                print("  %s" % (out.splitlines()[0] if out else "%s: no output" % tool))
-            except Exception:
-                print("  %s: not found on PATH" % tool)
+                r = subprocess.run([found, "--version"], capture_output=True,
+                                   text=True, timeout=10)
+                out = (r.stdout or r.stderr).strip().splitlines()
+                ver = out[0] if out else "no output"
+            except Exception as exc:
+                ver = "failed to run: %s" % exc
+            print("  %-8s %s" % (tool, found))
+            print("           %s" % ver)
+
+        # more than one install is a common and confusing cause of trouble
+        for tool in ("rigctl", "rigctld"):
+            seen = []
+            for d in os.environ.get("PATH", "").split(":"):
+                cand = os.path.join(d, tool)
+                if os.path.isfile(cand) and os.access(cand, os.X_OK):
+                    seen.append(cand)
+            if len(seen) > 1:
+                print(yellow("  note     %d copies of %s on PATH:" % (len(seen), tool)))
+                for c in seen:
+                    print("           %s" % c)
         print("  config  %s" % CONFIG_FILE)
         print("  state   %s" % STATE_DIR)
         return 0

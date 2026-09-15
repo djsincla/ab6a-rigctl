@@ -66,7 +66,7 @@ enum Daemons {
     }
 
     enum StartError: LocalizedError {
-        case notConnected
+        case notConnected(want: String, have: [String])
         case interfaceTaken(by: String)
         case portBusy(Int)
         case exited(Int32, log: String)
@@ -74,7 +74,12 @@ enum Daemons {
 
         var errorDescription: String? {
             switch self {
-            case .notConnected: return "That radio is not connected."
+            case .notConnected(let want, let have):
+                // say what was looked for and what is actually there, rather
+                // than leaving someone to guess
+                let seen = have.isEmpty ? "nothing is attached"
+                                        : "attached: " + have.joined(separator: ", ")
+                return "Not connected: \(want). \(seen)."
             case .interfaceTaken(let who): return "That interface is already open by \(who)."
             case .portBusy(let p): return "TCP port \(p) is already in use."
             case .exited(let code, let log): return "The daemon exited (status \(code)). \(log)"
@@ -86,7 +91,13 @@ enum Daemons {
     @discardableResult
     static func start(_ p: Profile, interfaces: [Interface], others: [Profile]) throws -> Int32 {
         if let pid = runningPID(p) { return pid }
-        guard let iface = p.match(in: interfaces) else { throw StartError.notConnected }
+        guard let iface = p.match(in: interfaces) else {
+            let d = p.device
+            let want = [d.product, d.dev, d.serial.map { "serial \($0)" }]
+                .compactMap { $0 }.first ?? "that device"
+            throw StartError.notConnected(want: want,
+                                          have: interfaces.map { $0.devicePath })
+        }
         // cu.* unless the profile asks for the dial-in node
         let devicePath = (p.node == "tty" ? iface.dialinPath : nil) ?? iface.devicePath
 

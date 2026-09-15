@@ -46,6 +46,8 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
     private var rows: [IfaceRow] = []
     private var radioFields: [String: RadioFields] = [:]
     private var showAll: NSButton!
+    private var testButton: NSButton!
+    private let testQueue = DispatchQueue(label: "rigctl.configtest")
 
     init(state: AppState, onSave: @escaping () -> Void) {
         self.state = state
@@ -73,7 +75,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 20
-        stack.edgeInsets = NSEdgeInsets(top: 16, left: 20, bottom: 16, right: 20)
+        stack.edgeInsets = NSEdgeInsets(top: 18, left: 24, bottom: 18, right: 24)
 
         showAll = NSButton(checkboxWithTitle: "Show all serial devices, not just /dev/cu.usbmodem*",
                            target: self, action: #selector(toggleShowAll))
@@ -138,10 +140,14 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
         cancel.bezelStyle = .rounded
 
-        let buttons = NSStackView(views: [NSView(), cancel, save])
+        testButton = NSButton(title: "Test", target: self, action: #selector(testTapped))
+        testButton.bezelStyle = .rounded
+        testButton.toolTip = "Run the daemon with these settings and see whether the rig answers"
+
+        let buttons = NSStackView(views: [testButton, NSView(), cancel, save])
         buttons.orientation = .horizontal
         buttons.spacing = 10
-        buttons.edgeInsets = NSEdgeInsets(top: 0, left: 20, bottom: 16, right: 20)
+        buttons.edgeInsets = NSEdgeInsets(top: 0, left: 24, bottom: 16, right: 24)
 
         let root = NSStackView(views: [scroll, buttons])
         root.orientation = .vertical
@@ -169,10 +175,14 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         ])
         window.contentView = content
 
-        // fit the window to the content rather than leaving empty space
+        // Fit the window to its content, in both directions. The interface rows
+        // are wider than any fixed width worth choosing, and pinning the window
+        // narrower than them pushed text against the edge.
         content.layoutSubtreeIfNeeded()
-        let needed = stack.fittingSize.height + 60
-        window.setContentSize(NSSize(width: 640, height: min(620, max(200, needed))))
+        let fit = stack.fittingSize
+        window.setContentSize(NSSize(
+            width: min(1200, max(680, fit.width + 20)),      // room for the scroller
+            height: min(700, max(220, fit.height + 62))))
     }
 
     /// Top-left origin, so scroll content starts at the top.
@@ -516,6 +526,150 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         return out
     }
 
+    // MARK: test
+
+    /// Runs each ticked interface for real, using the values currently in the
+    /// fields rather than what is saved, on a scratch port so a daemon already
+    /// running on the configured port is left alone.
+    @objc private func testTapped() {
+        let jobs: [(String, [String])] = rows.compactMap { rigctlJob(for: $0) }
+
+        guard !jobs.isEmpty else {
+            alert("Nothing to test.", detail: "Tick an interface first.")
+            return
+        }
+
+        // rigctl opens the serial port itself, so a daemon holding it would make
+        // the answers meaningless
+        let busy = state.profiles.filter { Daemons.runningPID($0) != nil }
+        if !busy.isEmpty {
+            let names = busy.map { $0.fullName }.joined(separator: ", ")
+            let a = NSAlert()
+            a.messageText = "Stop the running daemon first?"
+            a.informativeText = "rigctl talks to the radio directly, so it cannot share the "
+                + "serial port with \(names). Testing while it runs gives unreliable answers."
+            a.addButton(withTitle: "Stop and test")
+            a.addButton(withTitle: "Cancel")
+            a.beginSheetModal(for: window!) { [weak self] r in
+                guard r == .alertFirstButtonReturn else { return }
+                for p in busy { Daemons.stop(p) }
+                self?.runTests(jobs)
+            }
+            return
+        }
+        runTests(jobs)
+    }
+
+    private func runTests(_ jobs: [(String, [String])]) {
+
+        testButton.isEnabled = false
+        testButton.title = "Testing\u{2026}"
+        testQueue.async { [weak self] in
+            var lines: [String] = []
+            var allGood = true
+            for (name, cmd) in jobs {
+                if cmd.isEmpty {
+                    lines.append("\(name): no valid model chosen")
+                    allGood = false
+                    continue
+                }
+                let (ok, detail) = Self.tryRigctl(cmd)
+                lines.append("\(name): \(detail)")
+                if !ok { allGood = false }
+            }
+            DispatchQueue.main.async {
+                self?.testButton.isEnabled = true
+                self?.testButton.title = "Test"
+                self?.alert(allGood ? "Everything answered." : "Something did not work.",
+                            detail: lines.joined(separator: "\n\n"),
+                            style: allGood ? .informational : .warning)
+            }
+        }
+    }
+
+    /// The rigctl command line for one ticked interface, from the fields as they
+    /// stand rather than from what is saved.
+    private func rigctlJob(for row: IfaceRow) -> (String, [String])? {
+        guard row.enable.state == .on else { return nil }
+        guard let fields = radioFields[row.iface.radioKey] else { return nil }
+        let kind = DeviceKind.allCases[fields.kind.indexOfSelectedItem]
+        guard let model = ModelTable.id(fromListing: fields.model.stringValue, kind: kind) else {
+            return (row.enable.title, [])          // reported as "no valid model"
+        }
+
+        let useDialin = row.node.indexOfSelectedItem == 1
+        let fallback: String = row.iface.devicePath
+        let path: String = useDialin ? (row.iface.dialinPath ?? fallback) : fallback
+
+        var cmd: [String] = [kind.lister, "-m", String(model), "-r", path]
+        let baudIndex = fields.baud.indexOfSelectedItem
+        if baudIndex > 0 {
+            cmd.append("-s")
+            cmd.append(String(Self.bauds[baudIndex]))
+        }
+        let civ = fields.civ.stringValue.trimmingCharacters(in: .whitespaces)
+        if kind == .rig && !civ.isEmpty {
+            cmd.append("-c")
+            cmd.append(civ)
+        }
+        let rawExtra: String = row.extra.stringValue
+        let pieces: [String] = rawExtra.components(separatedBy: CharacterSet.whitespaces)
+        for piece in pieces where !piece.isEmpty {
+            cmd.append(piece)
+        }
+        return (row.enable.title, cmd)
+    }
+
+    /// Ask the rig directly with rigctl - no daemon, no TCP port.
+    ///
+    /// This is the honest test of a configuration: rigctl opens the serial
+    /// device itself with the model and baud rate given, so a wrong model or
+    /// the wrong port shows up immediately rather than as a daemon that starts
+    /// and then never answers.
+    private nonisolated static func tryRigctl(_ argv: [String]) -> (Bool, String) {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        proc.arguments = argv + ["f", "m"]
+        var env = ProcessInfo.processInfo.environment
+        let path = env["PATH"] ?? ""
+        for extra in ["/opt/homebrew/bin", "/usr/local/bin"] where !path.contains(extra) {
+            env["PATH"] = (env["PATH"] ?? "") + ":" + extra
+        }
+        proc.environment = env
+
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = pipe
+        do { try proc.run() } catch {
+            return (false, "could not run rigctl: \(error.localizedDescription)")
+        }
+
+        // rigctl can sit on a silent serial port; do not wait forever
+        let deadline = Date().addingTimeInterval(8)
+        while proc.isRunning && Date() < deadline { usleep(120_000) }
+        if proc.isRunning {
+            proc.terminate()
+            return (false, "rigctl did not answer within 8 seconds\n   " + argv.joined(separator: " "))
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let raw = String(decoding: data, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = raw.split(separator: "\n").map(String.init)
+
+        if proc.terminationStatus != 0 {
+            let why = lines.last ?? "exit status \(proc.terminationStatus)"
+            return (false, why + "\n   " + argv.joined(separator: " "))
+        }
+        guard let first = lines.first, Double(first) != nil else {
+            return (false, (raw.isEmpty ? "no reply" : raw)
+                         + "\n   " + argv.joined(separator: " "))
+        }
+        let mode = lines.count > 1 ? lines[1] : ""
+        let hz = RigClient.frequencyText(Double(first) ?? 0)
+        return (true, "working - \(hz) MHz \(mode)")
+    }
+
     // MARK: save
 
     @objc private func cancelTapped() { close() }
@@ -612,11 +766,12 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         return candidate
     }
 
-    private func alert(_ message: String, detail: String = "") {
+    private func alert(_ message: String, detail: String = "",
+                       style: NSAlert.Style = .warning) {
         let a = NSAlert()
         a.messageText = message
         a.informativeText = detail
-        a.alertStyle = .warning
+        a.alertStyle = style
         if let window { a.beginSheetModal(for: window, completionHandler: nil) }
     }
 }

@@ -76,8 +76,11 @@ struct Profile: Codable, Identifiable, Hashable {
             }
             if same.count == 1 { return same[0] }
         }
+        // Last resort, the path we used before. It may be either node: a
+        // profile saved with tty selected stores the dial-in path, which will
+        // never equal a call-out path.
         if let dev = device.dev {
-            return interfaces.first { $0.devicePath == dev }
+            return interfaces.first { $0.devicePath == dev || $0.dialinPath == dev }
         }
         return nil
     }
