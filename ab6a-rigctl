@@ -1343,6 +1343,7 @@ def stop_all(cfg):
 
 MENU = """
   {s} start    {k} stop     {r} restart   {t} test    {g} log
+  {c} check a configuration end to end
   {n} new      {e} edit     {x} delete
   {a} start all connected   {K} stop all
   {m} shared memory limits (sysctl)
@@ -1549,6 +1550,83 @@ def test_profile(profile):
               + ("SWR %s" % flat[0] if flat else "(no reply)"))
 
 
+def check_profile(cfg, profile, devices):
+    """Show the command a profile would run, then prove it actually works.
+
+    Different from `t`, which queries a daemon that is already up. This starts
+    from the configuration: resolves the device, shows the exact command line,
+    launches it if it is not already running, asks the rig something, and says
+    plainly whether it worked - then puts everything back as it found it.
+    """
+    kind = kind_of(profile)
+    print(bold("\n  %s" % full_name(profile)))
+
+    # 1. the device
+    dev = match_device(profile.get("device"), devices)
+    if not dev:
+        want = (profile.get("device") or {}).get("product") or "?"
+        print(red("   device    not connected") + dim("   expected %s" % want))
+        print(dim("   nothing else can be checked without it"))
+        return False
+    path = device_path(profile, dev)
+    print(green("   device    ") + path + dim("   (%s node)" % node_of(profile)))
+
+    # 2. the model
+    if any(m["id"] == profile["model"] for m in rig_models(kind)):
+        print(green("   model     ") + "%d  %s" % (profile["model"],
+                                                   model_name(profile["model"], kind)))
+    else:
+        print(red("   model     %d is not in the Hamlib %s table"
+                  % (profile["model"], KINDS[kind]["label"].lower())))
+        return False
+
+    # 3. the command itself
+    cmd = build_command(profile, path)
+    print(dim("   command   ") + " ".join(cmd))
+
+    # 4. the port
+    already = running_pid(profile)
+    if already:
+        print(green("   daemon    ") + "already running, pid %d" % already)
+    elif port_in_use(profile["port"]):
+        print(red("   port      %d is in use by something else" % profile["port"]))
+        return False
+
+    # 5. run it, if we have to
+    started_here = False
+    if not already:
+        if not start_profile(profile, devices, cfg):
+            print(red("   result    the daemon would not start - see the log above"))
+            return False
+        started_here = True
+        time.sleep(1.0)
+
+    # 6. ask the rig something
+    try:
+        replies = rig_query(profile["port"], query_for(profile),
+                            prime=vfo_of(profile) is not None)
+        flat = [l for group in replies for l in group]
+        bad = [l for l in flat if l.startswith("RPRT ") and l.split()[-1] not in ("0", "")]
+        if bad:
+            print(red("   result    the rig answered with an error: %s" % bad[0]))
+            ok = False
+        elif not flat:
+            print(red("   result    the daemon answered but the rig said nothing"))
+            ok = False
+        else:
+            print(green("   result    working") + dim("   %s" % "  ".join(flat[:4])))
+            ok = True
+    except (OSError, socket.timeout) as exc:
+        print(red("   result    could not reach the daemon on port %d (%s)"
+                  % (profile["port"], type(exc).__name__)))
+        ok = False
+
+    if started_here:
+        stop_profile(profile, quiet=True)
+        print(dim("   (started for the check, stopped again)"))
+    return ok
+
+
 def interactive():
     cfg = load_config()
     while True:
@@ -1557,7 +1635,7 @@ def interactive():
         print(bold("  AB6A RigCtl") + dim("  -  rigctld manager"))
         print_profiles(cfg, devices)
         print_devices(cfg, devices)
-        print(MENU.format(s=cyan("s"), k=cyan("k"), r=cyan("r"), t=cyan("t"),
+        print(MENU.format(s=cyan("s"), k=cyan("k"), r=cyan("r"), t=cyan("t"), c=cyan("c"),
                           g=cyan("g"), n=cyan("n"), e=cyan("e"), x=cyan("x"),
                           a=cyan("a"), K=cyan("K"), m=cyan("m"), v=cyan("v"),
                           l=cyan("l"), q=cyan("q")))
@@ -1591,6 +1669,9 @@ def interactive():
                 global SHOW_ALL_DEVICES
                 SHOW_ALL_DEVICES = not SHOW_ALL_DEVICES
                 continue
+            elif cmd == "c":
+                for p in need_targets(cfg, arg, devices):
+                    check_profile(cfg, p, devices)
             elif cmd in ("s", "k", "r", "t"):
                 # naming a radio acts on every daemon it runs
                 for p in need_targets(cfg, arg, devices):
@@ -1640,6 +1721,7 @@ USAGE = """usage: ab6a-rigctl [command]
   restart [name]   stop then start
   models [rig|rotator|amplifier] [search]
                    list Hamlib models for a device kind
+  check [name|all] show what a profile would run, then prove it works
   version          this app's version, Hamlib's, and where things live
   shm [--apply] [--persist]
                    show/raise the SysV shared memory limits some ham
@@ -1663,6 +1745,16 @@ def main(argv):
     if cmd in ("-h", "--help", "help"):
         print(USAGE)
         return 0
+
+    if cmd == "check":
+        devices = discover_devices()
+        target = args[0] if args else "all"
+        targets = flat_profiles(cfg) if target == "all" else resolve_many(cfg, target)
+        if not targets:
+            die("no such radio or daemon: %s" % target)
+        ok = all([check_profile(cfg, p, devices) for p in targets])
+        print()
+        return 0 if ok else 1
 
     if cmd in ("version", "--version", "-V"):
         # what to paste into a support message

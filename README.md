@@ -45,6 +45,21 @@ AB6A RigCtl 2.3
 
 The same versions appear in **About AB6A RigCtl…**.
 
+`ab6a-rigctl check` validates a configuration from scratch, rather than
+querying something already running. It resolves the device, confirms the model
+is in the Hamlib table, prints the exact command it would run, starts the daemon
+if it is not already up, asks the rig something, and says whether it worked —
+then puts everything back as it found it. It exits non-zero if anything failed,
+so it can be used in a script.
+
+```
+IC-7760 / main
+ device    /dev/cu.usbmodem14101   (cu node)
+ model     3092  Icom IC-7760 (Alpha)
+ command   rigctld -m 3092 -r /dev/cu.usbmodem14101 -t 4532 -s 115200
+ result    working   14084000  PKTUSB
+```
+
 **Console…** in the menu opens a window onto a running daemon: type a rigctl
 command, see the raw reply with its timing. Useful for working out what a rig
 actually answers rather than what the menu makes of it, and the output can be
@@ -200,6 +215,7 @@ ab6a-rigctl list | status      saved radios and whether they are running
 ab6a-rigctl start [name|all]   a radio name starts every daemon on it
 ab6a-rigctl stop  [name|all]   stop daemons
 ab6a-rigctl restart [name]
+ab6a-rigctl check [name|all]   validate a configuration end to end
 ab6a-rigctl models [rig|rotator|amplifier] [search]
 ```
 
