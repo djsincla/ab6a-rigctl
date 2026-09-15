@@ -477,6 +477,19 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         return l
     }
 
+    /// Ticks every interface, sets the node picker, and saves - exercising the
+    /// real save path rather than a description of it.
+    func selfTestSave(nodeIndex: Int) -> [String] {
+        for row in rows {
+            row.enable.state = .on
+            if row.node.isEnabled { row.node.selectItem(at: nodeIndex) }
+        }
+        saveTapped()
+        return Store.load().map {
+            "\($0.fullName): node=\($0.node ?? "nil")  dev=\($0.device.dev ?? "nil")"
+        }
+    }
+
     /// Describes the built window without showing it - exercises the whole
     /// construction path that runs when the window is opened.
     func selfTest() -> [String] {

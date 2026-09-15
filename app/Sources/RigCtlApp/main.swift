@@ -25,6 +25,20 @@ let delegate = MainActor.assumeIsolated { AppDelegate() }
 // A build-time smoke test for the menu construction path.
 if let mode = ProcessInfo.processInfo.environment["RIGCTL_SELFTEST"] {
     let lines = MainActor.assumeIsolated { () -> [String] in
+        if mode == "savecu" || mode == "savetty" {
+            let state = AppState()
+            state.refresh()
+            let w = ConfigWindowController(state: state, onSave: {})
+            return w.selfTestSave(nodeIndex: mode == "savetty" ? 1 : 0)
+        }
+        if mode == "start" {
+            // exercises the real path: AppState -> Daemons.start, not a copy of it
+            let state = AppState()
+            state.refresh()
+            state.startAllConnected()
+            Thread.sleep(forTimeInterval: 5)
+            return ["started via the app's own start path"]
+        }
         if mode == "cmd" {
             // what each profile would launch, without launching it
             let state = AppState()
