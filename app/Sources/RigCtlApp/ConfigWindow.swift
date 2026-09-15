@@ -368,7 +368,15 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         enable.state = existing != nil ? .on : .off
         enable.font = .systemFont(ofSize: 12)
 
-        let path = label(iface.devicePath, size: 11, secondary: true)
+        // With the full list showing, name the dial-in twin too: macOS exposes
+        // every port as both cu.* and tty.*, and a port is often known by its
+        // tty.* name elsewhere, so people look for it here and do not find it.
+        // The daemons are always given the cu.* node.
+        var pathText = iface.devicePath
+        if state.showAllDevices, let dialin = iface.dialinPath {
+            pathText += "   (\(dialin))"
+        }
+        let path = label(pathText, size: 11, secondary: true)
 
         let name = NSTextField(string: existing?.name ?? defaultName(for: iface, on: radio))
         name.placeholderString = "what will use it"

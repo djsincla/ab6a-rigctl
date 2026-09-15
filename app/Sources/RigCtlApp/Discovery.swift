@@ -4,7 +4,11 @@ import IOKit.serial
 
 /// One serial interface belonging to a radio.
 struct Interface: Identifiable, Hashable {
-    let devicePath: String        // /dev/cu.usbmodem114101
+    let devicePath: String        // /dev/cu.usbmodem114101 - the call-out node
+    /// The dial-in twin, /dev/tty.*. macOS exposes every serial port as both:
+    /// tty.* waits on carrier detect, cu.* opens immediately, so cu.* is what
+    /// the daemons are given. Shown so the pairing is visible.
+    let dialinPath: String?
     let vendorID: Int?
     let productID: Int?
     let serialNumber: String?
@@ -93,6 +97,7 @@ enum Discovery {
             // upwards through the service plane rather than on the node itself.
             out.append(Interface(
                 devicePath: path,
+                dialinPath: property(service, kIODialinDeviceKey) as? String,
                 vendorID: ancestor(service, "idVendor") as? Int,
                 productID: ancestor(service, "idProduct") as? Int,
                 serialNumber: ancestor(service, "USB Serial Number") as? String,

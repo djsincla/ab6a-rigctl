@@ -120,6 +120,16 @@ one for control, one for data — and only the data interface carries a `/dev`
 node. Nothing is missing: interface 2 is the control channel for the second
 port.
 
+### tty and cu
+
+macOS exposes every serial port twice: `/dev/tty.X` is the dial-in node, which
+waits on carrier detect, and `/dev/cu.X` is the call-out node, which opens
+immediately. The daemons are always given the `cu.*` node.
+
+Since a port is often known by its `tty.*` name elsewhere, ticking **Show all
+serial devices** names both, so `/dev/tty.usbserial-05670043C229` is recognisable
+as `/dev/cu.usbserial-05670043C229` here.
+
 ### A and B, and what they mean under split
 
 A dual-receive radio reports two VFOs, shown as **A** and **B**. These do
