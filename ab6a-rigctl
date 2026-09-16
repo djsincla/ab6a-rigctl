@@ -51,7 +51,7 @@ KINDS = {
 }
 RESERVED_PORTS = {k["port"] for k in KINDS.values()}
 
-APP_VERSION = "2.6"
+APP_VERSION = "2.7"
 
 DEFAULT_PORT = KINDS["rig"]["port"]
 BAUD_CHOICES = [4800, 9600, 19200, 38400, 57600, 115200]
