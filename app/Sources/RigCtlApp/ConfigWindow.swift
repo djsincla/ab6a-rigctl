@@ -182,10 +182,15 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         // are wider than any fixed width worth choosing, and pinning the window
         // narrower than them pushed text against the edge.
         content.layoutSubtreeIfNeeded()
-        let fit = stack.fittingSize
+        // Measure the button row rather than guessing at its height: a guess
+        // that falls short gets taken out of its bottom inset, leaving the
+        // buttons against the window edge.
+        let contentFit = stack.fittingSize
+        let buttonFit = buttons.fittingSize
+        let chrome = buttonFit.height + root.spacing + 26
         window.setContentSize(NSSize(
-            width: min(1200, max(680, fit.width + 20)),      // room for the scroller
-            height: min(700, max(220, fit.height + 62))))
+            width: min(1200, max(680, contentFit.width + 20)),   // room for the scroller
+            height: min(760, max(240, contentFit.height + chrome))))
     }
 
     /// Top-left origin, so scroll content starts at the top.
