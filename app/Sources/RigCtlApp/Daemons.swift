@@ -13,7 +13,10 @@ enum Daemons {
 
     static func command(_ p: Profile, device: String) -> [String] {
         let kind = p.deviceKind
-        var cmd = [kind.daemon, "-m", String(p.model), "-r", device, "-t", String(p.port)]
+        // an absolute path to a Hamlib that actually runs, rather than whatever
+        // PATH happens to offer first
+        var cmd = [Hamlib.tool(kind.daemon), "-m", String(p.model),
+                   "-r", device, "-t", String(p.port)]
         if let b = p.baud { cmd += ["-s", String(b)] }
         // -c is an Icom CI-V address; rotctld and ampctld have no such option
         if kind == .rig, let c = p.civaddr, !c.isEmpty { cmd += ["-c", c] }

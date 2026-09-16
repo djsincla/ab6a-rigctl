@@ -57,6 +57,60 @@ DEFAULT_PORT = KINDS["rig"]["port"]
 BAUD_CHOICES = [4800, 9600, 19200, 38400, 57600, 115200]
 
 
+# A machine can carry more than one Hamlib - a working one and, say, an older
+# hand-installed copy whose library has since been removed. Whichever comes
+# first on PATH wins, which is why a rig can work from one program and not
+# another. So each candidate is run and asked its version, and the first that
+# answers is used by absolute path.
+HAMLIB_DIRS = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"]
+_TOOLS = {}
+
+
+def hamlib_dir():
+    """Where the operator says Hamlib lives, if anywhere. Shared with the app."""
+    if not os.path.exists(CONFIG_FILE):
+        return None
+    try:
+        with open(CONFIG_FILE) as fh:
+            return json.load(fh).get("hamlib_dir") or None
+    except (OSError, ValueError):
+        return None
+
+
+def _runs(path):
+    try:
+        r = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=10)
+        return r.returncode == 0 and "Hamlib" in (r.stdout or "")
+    except Exception:
+        return False
+
+
+def hamlib_tool(name):
+    """Absolute path to a Hamlib tool that actually runs."""
+    if name in _TOOLS:
+        return _TOOLS[name]
+
+    # a location that was set is authoritative: if it is wrong, that should be
+    # visible rather than papered over
+    chosen = os.environ.get("AB6A_HAMLIB_DIR") or hamlib_dir()
+    if chosen:
+        path = os.path.join(chosen, name)
+        _TOOLS[name] = path if (os.access(path, os.X_OK) and _runs(path)) else name
+        return _TOOLS[name]
+
+    seen = list(HAMLIB_DIRS)
+    for d in os.environ.get("PATH", "").split(":"):
+        if d and d not in seen:
+            seen.append(d)
+    for d in seen:
+        path = os.path.join(d, name)
+        if os.access(path, os.X_OK) and _runs(path):
+            _TOOLS[name] = path
+            return path
+    _TOOLS[name] = name
+    return name
+
+
 def kind_of(profile):
     """Profiles written before rotators were supported were all radios."""
     return profile.get("kind") or "rig"
@@ -419,8 +473,8 @@ def rig_models(kind="rig"):
         return _MODELS[kind]
     _MODELS[kind] = []
     try:
-        out = subprocess.run([KINDS[kind]["lister"], "-l"], capture_output=True,
-                             text=True, timeout=20).stdout
+        out = subprocess.run([hamlib_tool(KINDS[kind]["lister"]), "-l"],
+                             capture_output=True, text=True, timeout=20).stdout
     except Exception:
         return _MODELS[kind]
     for line in out.splitlines():
@@ -707,7 +761,7 @@ def next_free_port(cfg, kind="rig"):
 
 
 def build_command(profile, dev_path):
-    cmd = [daemon_of(profile), "-m", str(profile["model"]), "-r", dev_path,
+    cmd = [hamlib_tool(daemon_of(profile)), "-m", str(profile["model"]), "-r", dev_path,
            "-t", str(profile["port"])]
     if profile.get("baud"):
         cmd += ["-s", str(profile["baud"])]
@@ -1737,8 +1791,13 @@ USAGE = """usage: ab6a-rigctl [command]
 
 
 def main(argv):
-    if not shutil.which("rigctld"):
-        die("rigctld not found on PATH - install it with: brew install hamlib")
+    resolved = hamlib_tool("rigctld")
+    if "/" not in resolved:
+        chosen = os.environ.get("AB6A_HAMLIB_DIR") or hamlib_dir()
+        if chosen:
+            die("no working Hamlib in %s - correct or clear that location (hamlib_dir in %s)"
+                % (chosen, CONFIG_FILE))
+        die("no working Hamlib found - install it with: brew install hamlib")
 
     if not argv:
         if not sys.stdin.isatty():

@@ -46,6 +46,8 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
     private var rows: [IfaceRow] = []
     private var radioFields: [String: RadioFields] = [:]
     private var showAll: NSButton!
+    private var hamlibField: NSTextField!
+    private var hamlibStatus: NSTextField!
     private var testButton: NSButton!
     private let testQueue = DispatchQueue(label: "rigctl.configtest")
 
@@ -82,6 +84,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         showAll.state = state.showAllDevices ? .on : .off
         showAll.font = .systemFont(ofSize: 11)
         stack.addArrangedSubview(showAll)
+        stack.addArrangedSubview(hamlibRow())
 
         let radios = state.selectableRadios
         if radios.isEmpty {
@@ -188,6 +191,63 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
     /// Top-left origin, so scroll content starts at the top.
     private final class FlippedView: NSView {
         override var isFlipped: Bool { true }
+    }
+
+    /// Where Hamlib lives. Normally blank - it is found automatically - but a
+    /// machine with Hamlib somewhere unusual, or with a broken copy shadowing a
+    /// good one, needs to be able to say.
+    private func hamlibRow() -> NSView {
+        hamlibField = NSTextField(string: Store.hamlibDir ?? "")
+        hamlibField.placeholderString = "found automatically - set only if that fails"
+        hamlibField.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        hamlibField.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        hamlibField.target = self
+        hamlibField.action = #selector(hamlibChanged)
+
+        let choose = NSButton(title: "Choose\u{2026}", target: self,
+                              action: #selector(chooseHamlib))
+        choose.bezelStyle = .rounded
+        choose.controlSize = .small
+
+        hamlibStatus = label("", size: 11, secondary: true)
+        updateHamlibStatus()
+
+        let row = NSStackView(views: [
+            label("Hamlib", size: 11, secondary: true), hamlibField, choose, hamlibStatus,
+        ])
+        row.orientation = .horizontal
+        row.spacing = 8
+        return row
+    }
+
+    private func updateHamlibStatus() {
+        Hamlib.forget()
+        if let v = Hamlib.version {
+            hamlibStatus.stringValue = "found \(v)"
+            hamlibStatus.textColor = .secondaryLabelColor
+        } else {
+            hamlibStatus.stringValue = "not found - daemons cannot start"
+            hamlibStatus.textColor = .systemRed
+        }
+    }
+
+    @objc private func hamlibChanged() {
+        Store.hamlibDir = hamlibField.stringValue.trimmingCharacters(in: .whitespaces)
+        updateHamlibStatus()
+    }
+
+    @objc private func chooseHamlib() {
+        let panel = NSOpenPanel()
+        panel.title = "Where is Hamlib installed?"
+        panel.message = "Choose the folder holding rigctl and rigctld, usually a bin directory."
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.beginSheetModal(for: window!) { [weak self] r in
+            guard r == .OK, let url = panel.url, let self else { return }
+            self.hamlibField.stringValue = url.path
+            self.hamlibChanged()
+        }
     }
 
     @objc private func toggleShowAll() {
@@ -601,7 +661,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         let fallback: String = row.iface.devicePath
         let path: String = useDialin ? (row.iface.dialinPath ?? fallback) : fallback
 
-        var cmd: [String] = [kind.lister, "-m", String(model), "-r", path]
+        var cmd: [String] = [Hamlib.tool(kind.lister), "-m", String(model), "-r", path]
         let baudIndex = fields.baud.indexOfSelectedItem
         if baudIndex > 0 {
             cmd.append("-s")

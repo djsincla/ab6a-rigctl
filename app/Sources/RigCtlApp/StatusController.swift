@@ -179,14 +179,19 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     private func updateButton() {
         guard let button = statusItem.button else { return }
-        let name = state.anyRunning
-            ? "antenna.radiowaves.left.and.right"
-            : "antenna.radiowaves.left.and.right.slash"
+        let missing = Hamlib.version == nil
+        let name = missing
+            ? "exclamationmark.triangle"
+            : (state.anyRunning ? "antenna.radiowaves.left.and.right"
+                                : "antenna.radiowaves.left.and.right.slash")
         let image = NSImage(systemSymbolName: name, accessibilityDescription: "AB6A RigCtl")
-        image?.isTemplate = !state.anyRunning
+        image?.isTemplate = !state.anyRunning && !missing
         button.image = image
-        button.contentTintColor = state.anyRunning ? Self.accent : nil
-        button.toolTip = state.anyRunning ? "AB6A RigCtl - daemons running" : "AB6A RigCtl"
+        button.contentTintColor = missing ? .systemRed
+                                          : (state.anyRunning ? Self.accent : nil)
+        button.toolTip = missing
+            ? "AB6A RigCtl - Hamlib not found; install it with: brew install hamlib"
+            : (state.anyRunning ? "AB6A RigCtl - daemons running" : "AB6A RigCtl")
     }
 
     /// Builds the menu once and describes it, without a status bar or run loop.
@@ -207,6 +212,31 @@ final class StatusController: NSObject, NSMenuDelegate {
         state.refresh()
         menu.removeAllItems()
         readingItems.removeAll()
+
+        // Nothing works without Hamlib, so say so first and plainly rather than
+        // letting every daemon fail on its own.
+        if Hamlib.version == nil {
+            let warn = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            // a location that was set and does not work is a different problem
+            // from Hamlib not being installed
+            let chosen = Store.hamlibDir
+            let headline = chosen == nil ? "Hamlib not found"
+                                         : "No Hamlib where you pointed it"
+            let advice = chosen.map { "      nothing usable in  \($0)\n      clear or correct it in Configure\u{2026}" }
+                ?? "      install it with:  brew install hamlib"
+            let t = NSMutableAttributedString(
+                string: headline + "\n",
+                attributes: [.font: NSFont.menuFont(ofSize: 13).bold,
+                             .foregroundColor: NSColor.systemRed])
+            t.append(NSAttributedString(
+                string: advice,
+                attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+                             .foregroundColor: Self.detailColor]))
+            warn.attributedTitle = t
+            warn.isEnabled = true
+            menu.addItem(warn)
+            menu.addItem(.separator())
+        }
 
         if state.profiles.isEmpty {
             menu.addItem(info("No radios configured yet"))
@@ -244,7 +274,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         let startAll = NSMenuItem(title: "Start all connected",
                                   action: #selector(startAll), keyEquivalent: "")
         startAll.target = self
-        startAll.isEnabled = state.profiles.contains {
+        startAll.isEnabled = Hamlib.version != nil && state.profiles.contains {
             state.status[$0.id]?.connected == true && state.status[$0.id]?.running != true
         }
         menu.addItem(startAll)

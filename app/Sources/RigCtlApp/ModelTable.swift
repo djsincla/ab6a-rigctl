@@ -95,7 +95,7 @@ enum ModelTable {
         defer { cache[kind] = table; models[kind] = list }
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        proc.arguments = [kind.lister, "-l"]
+        proc.arguments = [Hamlib.tool(kind.lister), "-l"]
         var env = ProcessInfo.processInfo.environment
         for extra in ["/opt/homebrew/bin", "/usr/local/bin"]
         where !(env["PATH"] ?? "").contains(extra) {

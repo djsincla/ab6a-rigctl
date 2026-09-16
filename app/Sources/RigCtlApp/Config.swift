@@ -88,6 +88,14 @@ struct Profile: Codable, Identifiable, Hashable {
 
 struct ConfigFile: Codable {
     var profiles: [Profile]
+    /// Where to find Hamlib, when it is not anywhere obvious. Shared with the
+    /// CLI, which reads the same file.
+    var hamlibDir: String?
+
+    enum CodingKeys: String, CodingKey {
+        case profiles
+        case hamlibDir = "hamlib_dir"
+    }
 }
 
 enum Store {
@@ -110,17 +118,36 @@ enum Store {
             .appendingPathComponent(".local/state/ab6a-rigctl")
     }()
 
-    static func load() -> [Profile] {
-        guard let data = try? Data(contentsOf: configURL) else { return [] }
-        let dec = JSONDecoder()
-        return (try? dec.decode(ConfigFile.self, from: data))?.profiles ?? []
+    static func loadFile() -> ConfigFile {
+        guard let data = try? Data(contentsOf: configURL),
+              let file = try? JSONDecoder().decode(ConfigFile.self, from: data)
+        else { return ConfigFile(profiles: [], hamlibDir: nil) }
+        return file
+    }
+
+    static func load() -> [Profile] { loadFile().profiles }
+
+    /// Where the operator says Hamlib lives, if anywhere.
+    static var hamlibDir: String? {
+        get { loadFile().hamlibDir }
+        set {
+            var file = loadFile()
+            file.hamlibDir = (newValue?.isEmpty ?? true) ? nil : newValue
+            try? write(file)
+        }
     }
 
     static func save(_ profiles: [Profile]) throws {
+        var file = loadFile()          // keep hamlib_dir across a profile save
+        file.profiles = profiles
+        try write(file)
+    }
+
+    private static func write(_ file: ConfigFile) throws {
         try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-        var data = try enc.encode(ConfigFile(profiles: profiles))
+        var data = try enc.encode(file)
         data.append(0x0A)
         let tmp = configURL.appendingPathExtension("tmp")
         try data.write(to: tmp)
