@@ -385,10 +385,12 @@ def match_device(fp, devices):
         if len(candidates) == 1:
             return candidates[0]
 
-    # last resort: the exact /dev path we used before
+    # Last resort: the path we used before. It may be either node - a profile
+    # saved with tty selected stores the dial-in path, which will never equal a
+    # call-out path.
     if fp.get("dev"):
         for d in devices:
-            if d["dev"] == fp["dev"]:
+            if fp["dev"] in (d["dev"], d.get("dialin")):
                 return d
     return None
 
