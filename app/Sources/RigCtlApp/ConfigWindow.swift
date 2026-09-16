@@ -49,6 +49,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
     private var hamlibField: NSTextField!
     private var hamlibStatus: NSTextField!
     private var testButton: NSButton!
+    private var sizingNote = ""
     private let testQueue = DispatchQueue(label: "rigctl.configtest")
 
     init(state: AppState, onSave: @escaping () -> Void) {
@@ -150,11 +151,21 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         let buttons = NSStackView(views: [testButton, NSView(), cancel, save])
         buttons.orientation = .horizontal
         buttons.spacing = 10
-        buttons.edgeInsets = NSEdgeInsets(top: 0, left: 24, bottom: 16, right: 24)
+        buttons.edgeInsets = NSEdgeInsets(top: 0, left: 24, bottom: 0, right: 24)
+
+        // The scroll view gives up space, never the button row. Required
+        // *hugging* on the row would be wrong: NSStackView's fittingSize leaves
+        // its own insets out, so hugging it tightly squashes them away - which
+        // is what put the buttons against the window edge.
+        buttons.setContentCompressionResistancePriority(.required, for: .vertical)
+        scroll.setContentHuggingPriority(.defaultLow, for: .vertical)
+        scroll.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
         let root = NSStackView(views: [scroll, buttons])
         root.orientation = .vertical
         root.spacing = 8
+        // the bottom margin lives here, where nothing can collapse it
+        root.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 20, right: 0)
         root.translatesAutoresizingMaskIntoConstraints = false
 
         let content = NSView()
@@ -186,11 +197,17 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
         // that falls short gets taken out of its bottom inset, leaving the
         // buttons against the window edge.
         let contentFit = stack.fittingSize
+        // fittingSize leaves the stack's own insets out, so add them back
         let buttonFit = buttons.fittingSize
-        let chrome = buttonFit.height + root.spacing + 26
+        let rowHeight = max(buttonFit.height, 32)
+        let chrome = rowHeight + root.spacing + root.edgeInsets.bottom + 8
+        let finalHeight = min(760, max(240, contentFit.height + chrome))
         window.setContentSize(NSSize(
             width: min(1200, max(680, contentFit.width + 20)),   // room for the scroller
-            height: min(760, max(240, contentFit.height + chrome))))
+            height: finalHeight))
+        sizingNote = "content \(Int(contentFit.height))  buttons \(Int(buttonFit.height))"
+            + "  chrome \(Int(chrome))  window \(Int(finalHeight))"
+            + "  root \(Int(root.fittingSize.height))"
     }
 
     /// Top-left origin, so scroll content starts at the top.
@@ -570,6 +587,7 @@ final class ConfigWindowController: NSWindowController, NSWindowDelegate {
     func selfTest() -> [String] {
         var out: [String] = []
         out.append("show all serial devices: \(showAll.state == .on)")
+        out.append("sizing: \(sizingNote)")
         out.append("discovery: \(state.radios.count) devices, selectable: \(state.selectableRadios.count), fields: \(radioFields.count)")
         for r in state.radios {
             out.append("   seen: \(r.name)  \(r.interfaces.map { $0.devicePath }.joined(separator: " "))")
