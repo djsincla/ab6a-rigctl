@@ -312,6 +312,14 @@ interface 3   class 10   CDC-Data  <span class="a">&rarr;</span>  /dev/cu.usbmod
       or anything else already connected. Versions are named on open, and
       <code>ab6a-rigctl version</code> prints the same alongside where the configuration lives.
     </p>
+    <p style="color:var(--muted);font-size:14px;margin:14px 0 0">
+      <strong style="color:var(--ink)">Configure&hellip;</strong> also has a
+      <strong style="color:var(--ink)">Test</strong> button, which runs <code>rigctl</code> against
+      the radio using the values currently in the fields &mdash; before saving them &mdash; and says
+      whether it answered. It offers to stop a running daemon first, since <code>rigctl</code> needs
+      the serial port to itself. From the command line,
+      <code>ab6a-rigctl check</code> does the same from a saved configuration.
+    </p>
   </div>
 </section>
 
@@ -356,6 +364,33 @@ interface 3   class 10   CDC-Data  <span class="a">&rarr;</span>  /dev/cu.usbmod
 
 <section>
   <div class="wrap">
+    <h2>When there is more than one Hamlib</h2>
+    <p style="color:var(--muted);font-size:15px;margin:0 0 16px">
+      A machine can carry more than one Hamlib &mdash; a working one, and an older hand-installed
+      copy whose library has since been removed. Whichever comes first on
+      <code>PATH</code> wins, and an app launched from the Finder inherits a different
+      <code>PATH</code> from a terminal. That is a common reason a rig works from the command line
+      and not from an app, with nothing on screen to say why.
+    </p>
+    <p style="color:var(--muted);font-size:15px;margin:0 0 16px">
+      So rather than trusting <code>PATH</code>, each candidate is run and asked its version, and
+      the first that answers is used by absolute path. A broken copy earlier on
+      <code>PATH</code> is skipped. If none works, the menu says so, the menu bar icon turns into a
+      warning, and <strong style="color:var(--ink)">Start all</strong> is disabled rather than
+      failing daemon by daemon.
+    </p>
+    <p class="warn">
+      Hamlib can also be pointed at directly &mdash; a <strong style="color:var(--ink)">Hamlib</strong>
+      field in <strong style="color:var(--ink)">Configure&hellip;</strong>, or
+      <code>hamlib_dir</code> in the configuration file, shared with the command line tool. A
+      location that is set is authoritative: if it is wrong that is reported rather than papered
+      over by quietly falling back to something else.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <h2>Install</h2>
 <p style="margin:0 0 18px">
       <a href="https://github.com/djsincla/ab6a-rigctl/releases/latest"
@@ -388,11 +423,16 @@ cd ab6a-rigctl &amp;&amp; ./build-app.sh --install</pre>
     <h2>Command line</h2>
     <table>
       <tr><th>Command</th><th>Does</th></tr>
-      <tr><td><code>ab6a-rigctl</code></td><td>interactive manager — add radios, pick interfaces and ports</td></tr>
-      <tr><td><code>ab6a-rigctl devices</code></td><td>list attached radios</td></tr>
-      <tr><td><code>ab6a-rigctl list</code></td><td>saved radios and whether they are running</td></tr>
-      <tr><td><code>ab6a-rigctl start <span style="color:var(--muted)">[name|all]</span></code></td><td>a radio name starts every daemon on it</td></tr>
+      <tr><td><code>ab6a-rigctl</code></td><td>interactive manager &mdash; add devices, pick interfaces and ports</td></tr>
+      <tr><td><code>ab6a-rigctl check <span style="color:var(--muted)">[name|all]</span></code></td>
+          <td>validate a configuration end to end, and say whether the rig answered</td></tr>
+      <tr><td><code>ab6a-rigctl version</code></td>
+          <td>versions, which Hamlib binaries resolve, and where the configuration lives</td></tr>
+      <tr><td><code>ab6a-rigctl devices <span style="color:var(--muted)">[--all]</span></code></td><td>list attached devices</td></tr>
+      <tr><td><code>ab6a-rigctl list</code></td><td>saved devices and whether they are running</td></tr>
+      <tr><td><code>ab6a-rigctl start <span style="color:var(--muted)">[name|all]</span></code></td><td>a device name starts every daemon on it</td></tr>
       <tr><td><code>ab6a-rigctl stop <span style="color:var(--muted)">[name|all]</span></code></td><td>stop daemons</td></tr>
+      <tr><td><code>ab6a-rigctl models <span style="color:var(--muted)">[rig|rotator|amplifier]</span></code></td><td>search the Hamlib model list</td></tr>
     </table>
   </div>
 </section>
